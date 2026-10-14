@@ -30,7 +30,7 @@ function checkPath(expr: Expr & { t: 'path' }, declared: Declared): Problem | nu
       })
     }
     if (firstField === 'visits') {
-      const node = second && 'field' in second ? second.field : undefined
+      const node = second ? ('field' in second ? second.field : String(second.index)) : undefined
       if (node === undefined || !declared.nodes.has(node)) {
         return problem('bad-condition', 'run.visits is read with the id of a node of this graph', {
           column: second?.column ?? first?.column,

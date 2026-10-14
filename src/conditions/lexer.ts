@@ -111,7 +111,13 @@ export function tokenize(text: string): Token[] {
       continue
     }
     const op = OPERATORS.find((candidate) => text.startsWith(candidate, i))
-    if (!op) throw new ConditionSyntaxError(`'${ch}' is not part of the condition language`, i + 1)
+    if (!op) {
+      const hint =
+        ch === '-' && IDENT_PART.test(text[i - 1] ?? '')
+          ? "; a name with a dash is read with brackets, such as run.visits['fix-review']"
+          : ''
+      throw new ConditionSyntaxError(`'${ch}' is not part of the condition language${hint}`, i + 1)
+    }
     tokens.push({ type: 'op', text: op, column: i + 1 })
     i += op.length
   }
