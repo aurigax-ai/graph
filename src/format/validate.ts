@@ -535,7 +535,8 @@ export function validateGraph(
     ...checkLimits(top.data.limits),
   )
   if (problems.length > 0) return { problems }
-  const graph = { ...top.data, state: state.keys, nodes: nodeCheck.nodes, edges } as GraphFile
+  const { ui: _ui, ...rest } = top.data
+  const graph = { ...rest, state: state.keys, nodes: nodeCheck.nodes, edges } as GraphFile
   const ids = new Set(graph.nodes.map((n) => n.id))
   const byId = new Map(graph.nodes.map((n) => [n.id, n]))
   const declared = { state: new Set(Object.keys(state.keys)), nodes: ids }

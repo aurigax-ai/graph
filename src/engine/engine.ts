@@ -293,6 +293,10 @@ export class Engine {
     return matched
   }
 
+  waitingOn(event: Output): { run: GraphRun; node: string }[] {
+    return this.active().flatMap((run) => run.waitingOn(event).map((node) => ({ run, node })))
+  }
+
   summaries(scope?: string): RunSummary[] {
     return this.opts.store
       .list(scope)

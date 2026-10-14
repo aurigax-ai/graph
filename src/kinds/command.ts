@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { KindDescriptor, NodeKind, Output } from '../engine/contract'
+import type { KindDescriptor, NodeContext, NodeKind, Output } from '../engine/contract'
 import { NodeError } from '../engine/contract'
 import { MINUTE_MS } from '../format/duration'
 import { argument } from './fields'
@@ -40,6 +40,7 @@ export const commandKind: KindDescriptor = {
 }
 
 export interface ProcessRequest {
+  scope: string
   argv: string[]
   env: Record<string, string>
   timeoutMs: number
@@ -75,9 +76,10 @@ export function commandNode(runProcess: ProcessRunner): NodeKind {
   return {
     kind: 'command',
     version: 1,
-    start: async (input: Output, ctx) => {
+    start: async (input: Output, ctx: NodeContext) => {
       const argv = (input.run as unknown[]).map(argvText)
       const reply = await runProcess({
+        scope: ctx.scope,
         argv,
         env: commandEnv(ctx),
         timeoutMs: ctx.timeoutMs ?? COMMAND_TIMEOUT_MS,

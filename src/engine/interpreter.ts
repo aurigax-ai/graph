@@ -658,6 +658,12 @@ export class GraphRun {
     this.deps.ended(status)
   }
 
+  recordReport(node: string, valid: boolean): Promise<void> {
+    return this.serial(() => {
+      if (this.state.active.has(node)) this.record({ type: 'node-report', node, valid })
+    })
+  }
+
   pause(): Promise<void> {
     return this.serial(() => {
       if (!isEnded(this.state.status) && !this.state.paused) this.record({ type: 'run-pause' })
