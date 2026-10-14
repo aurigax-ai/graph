@@ -1,3 +1,11 @@
+export {
+  type CommandOutput,
+  dryRunCommand,
+  explainCommand,
+  nodesCommand,
+  schemaCommand,
+  validateCommand,
+} from './cli/commands.ts'
 export { main as runCli } from './cli/main.ts'
 export { headlessHost, realClock, runProcess } from './cli/headlessHost.ts'
 export { checkCondition } from './conditions/check.ts'
@@ -46,7 +54,17 @@ export {
   parseGraphText,
   readGraphFile,
 } from './format/graphFile.ts'
-export type { GraphFile, Problem } from './format/model.ts'
+export {
+  END,
+  GRAPHS_LISTED_MAX,
+  type GraphFile,
+  NAME_PATTERN,
+  type Problem,
+  isConditional,
+  isJoin,
+  startNodes,
+  triggerKind,
+} from './format/model.ts'
 export { resultErrors } from './format/resultSchema.ts'
 export { graphJsonSchema } from './format/schema.ts'
 export { validateGraph } from './format/validate.ts'
