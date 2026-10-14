@@ -70,10 +70,10 @@ interface Live {
   cancels: (() => void)[]
 }
 
-export function reportParagraph(result: Record<string, unknown>): string {
+export function reportParagraph(result: Record<string, unknown>, runId: string): string {
   return [
     'When you have finished, report your result as your last action before you stop, with:',
-    "ostia graph report --json '<one JSON object>'",
+    `ostia graph report --json '<one JSON object>' --run ${runId}`,
     `The object must match this JSON Schema: ${JSON.stringify(result)}`,
     'If the command prints errors, fix the object and run it again. Your closing message is not read as the result.',
   ].join('\n')
@@ -275,7 +275,10 @@ export class GraphRun {
       throw err
     }
     if (kind.takesResult && node.result && typeof input.prompt === 'string') {
-      input = { ...input, prompt: `${input.prompt.trimEnd()}\n\n${reportParagraph(node.result)}` }
+      input = {
+        ...input,
+        prompt: `${input.prompt.trimEnd()}\n\n${reportParagraph(node.result, this.state.id)}`,
+      }
     }
     if (
       kind.maxPrompt &&
