@@ -1,5 +1,5 @@
-import { parseDuration } from '../format/duration'
-import { ALL_ERRORS, type CatchRule, type GraphNode, type RetryRule } from '../format/model'
+import { parseDuration } from '../format/duration.ts'
+import { ALL_ERRORS, type CatchRule, type GraphNode, type RetryRule } from '../format/model.ts'
 
 export const RETRY_INTERVAL_MS = 1000
 export const RETRY_BACKOFF = 2

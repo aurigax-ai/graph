@@ -1,6 +1,6 @@
 import { z } from 'zod'
-import type { KindDescriptor } from '../engine/contract'
-import { line, text } from './fields'
+import type { KindDescriptor } from '../engine/contract.ts'
+import { line, text } from './fields.ts'
 
 export const QUESTION_MAX = 500
 export const CONTEXT_MAX = 4000

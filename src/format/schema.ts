@@ -1,7 +1,7 @@
 import { z } from 'zod'
-import type { KindDescriptor } from '../engine/contract'
-import { line } from '../kinds/fields'
-import { HOUR_MS, MINUTE_MS, parseDuration } from './duration'
+import type { KindDescriptor } from '../engine/contract.ts'
+import { line } from '../kinds/fields.ts'
+import { HOUR_MS, MINUTE_MS, parseDuration } from './duration.ts'
 import {
   ALL_ERRORS,
   CATCH_MAX,
@@ -14,7 +14,7 @@ import {
   STRING_MAX,
   TRIGGERS_MAX,
   WHEN_MAX,
-} from './model'
+} from './model.ts'
 
 export const LIMIT_CEILINGS = {
   steps: 500,

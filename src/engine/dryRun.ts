@@ -1,11 +1,11 @@
-import type { LoadedGraph } from '../format/graphFile'
-import { type Problem, problem } from '../format/model'
-import { FORMAT_KINDS } from '../kinds/catalog'
-import type { Clock, Host, NodeKind, Output } from './contract'
-import { Engine } from './engine'
-import { MemoryJournalStore } from './journal'
-import { isEnded } from './runState'
-import { runView } from './summary'
+import type { LoadedGraph } from '../format/graphFile.ts'
+import { type Problem, problem } from '../format/model.ts'
+import { FORMAT_KINDS } from '../kinds/catalog.ts'
+import type { Clock, Host, NodeKind, Output } from './contract.ts'
+import { Engine } from './engine.ts'
+import { MemoryJournalStore } from './journal.ts'
+import { isEnded } from './runState.ts'
+import { runView } from './summary.ts'
 
 export interface DryStep {
   node: string

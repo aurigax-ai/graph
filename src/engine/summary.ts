@@ -1,7 +1,7 @@
-import type { GraphFile } from '../format/model'
-import type { NodeWait, Output } from './contract'
-import type { Line, NodeFailure, RunKey, RunStatus } from './journal'
-import { type RunState, applyLine, newRunState } from './runState'
+import type { GraphFile } from '../format/model.ts'
+import type { NodeWait, Output } from './contract.ts'
+import type { Line, NodeFailure, RunKey, RunStatus } from './journal.ts'
+import { type RunState, applyLine, newRunState } from './runState.ts'
 
 export interface RunSummary extends RunKey {
   status: RunStatus | 'journal-version'

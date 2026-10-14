@@ -1,5 +1,5 @@
-import { type Problem, problem } from '../format/model'
-import type { Expr } from './parser'
+import { type Problem, problem } from '../format/model.ts'
+import type { Expr } from './parser.ts'
 
 export const RUN_FIELDS = ['id', 'graph', 'steps', 'remaining', 'visits', 'attempt'] as const
 

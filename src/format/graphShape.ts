@@ -6,7 +6,7 @@ import {
   isConditional,
   isJoin,
   startNodes,
-} from './model'
+} from './model.ts'
 
 export interface Arc {
   to: string

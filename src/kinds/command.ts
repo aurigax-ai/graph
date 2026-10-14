@@ -1,8 +1,8 @@
 import { z } from 'zod'
-import type { KindDescriptor, NodeContext, NodeKind, Output } from '../engine/contract'
-import { NodeError } from '../engine/contract'
-import { MINUTE_MS } from '../format/duration'
-import { argument } from './fields'
+import type { KindDescriptor, NodeContext, NodeKind, Output } from '../engine/contract.ts'
+import { NodeError } from '../engine/contract.ts'
+import { MINUTE_MS } from '../format/duration.ts'
+import { argument } from './fields.ts'
 
 export const ARGV_MAX = 64
 export const ARG_MAX = 4096

@@ -1,8 +1,8 @@
-import type { KindDescriptor } from '../engine/contract'
-import { agentKind } from './agent'
-import { commandKind } from './command'
-import { approvalKind, connectorKind } from './humanKinds'
-import { notifyKind, routerKind, waitKind } from './smallKinds'
+import type { KindDescriptor } from '../engine/contract.ts'
+import { agentKind } from './agent.ts'
+import { commandKind } from './command.ts'
+import { approvalKind, connectorKind } from './humanKinds.ts'
+import { notifyKind, routerKind, waitKind } from './smallKinds.ts'
 
 export const FORMAT_KINDS: readonly KindDescriptor[] = [
   agentKind,

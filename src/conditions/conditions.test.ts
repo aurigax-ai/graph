@@ -1,8 +1,8 @@
 import { evaluate as celEvaluate } from '@marcbachmann/cel-js'
 import { describe, expect, it } from 'vitest'
-import { checkCondition } from './check'
-import { evaluateCondition } from './evaluate'
-import { parseCondition } from './parser'
+import { checkCondition } from './check.ts'
+import { evaluateCondition } from './evaluate.ts'
+import { parseCondition } from './parser.ts'
 
 const scope = {
   state: {

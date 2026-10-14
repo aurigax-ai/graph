@@ -1,4 +1,4 @@
-import { STRING_MAX, type StateKeySpec, type StateType, isRecord } from './model'
+import { STRING_MAX, type StateKeySpec, type StateType, isRecord } from './model.ts'
 
 export function typeMatches(type: StateType, value: unknown): boolean {
   switch (type) {

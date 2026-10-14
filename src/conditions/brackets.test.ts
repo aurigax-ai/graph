@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { checkCondition } from './check'
-import { evaluateCondition } from './evaluate'
-import { parseCondition } from './parser'
+import { checkCondition } from './check.ts'
+import { evaluateCondition } from './evaluate.ts'
+import { parseCondition } from './parser.ts'
 
 describe('reading a node id with a dash', () => {
   it('works with brackets, and the error for the dotted form says so', () => {

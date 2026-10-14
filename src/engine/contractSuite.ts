@@ -1,10 +1,10 @@
-import { loadGraphText } from '../format/graphFile'
-import { CONTRACT_VERSION } from '../format/model'
-import { descriptorOf } from '../kinds/catalog'
-import type { Host, Notice } from './contract'
-import { Engine } from './engine'
-import { MemoryJournalStore } from './journal'
-import { isEnded } from './runState'
+import { loadGraphText } from '../format/graphFile.ts'
+import { CONTRACT_VERSION } from '../format/model.ts'
+import { descriptorOf } from '../kinds/catalog.ts'
+import type { Host, Notice } from './contract.ts'
+import { Engine } from './engine.ts'
+import { MemoryJournalStore } from './journal.ts'
+import { isEnded } from './runState.ts'
 
 const PROBE = (command: string[]) => `version: 1
 on: [{ manual: {} }]

@@ -1,8 +1,8 @@
 import { z } from 'zod'
-import type { KindCheckContext, KindDescriptor, Output } from '../engine/contract'
-import { HOUR_MS, MINUTE_MS } from '../format/duration'
-import { type GraphNode, type Problem, problem } from '../format/model'
-import { NODE_REF, text } from './fields'
+import type { KindCheckContext, KindDescriptor, Output } from '../engine/contract.ts'
+import { HOUR_MS, MINUTE_MS } from '../format/duration.ts'
+import { type GraphNode, type Problem, problem } from '../format/model.ts'
+import { NODE_REF, text } from './fields.ts'
 
 export const PROMPT_MAX = 16_000
 export const MESSAGE_MAX = 8000

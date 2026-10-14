@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { WORKED_GRAPHS, type WorkedGraph, workedGraph } from '../engine/fixtures'
-import { main } from './main'
+import { WORKED_GRAPHS, type WorkedGraph, workedGraph } from '../engine/fixtures.ts'
+import { main } from './main.ts'
 
 function workspace(): string {
   const dir = mkdtempSync(join(tmpdir(), 'graph-cli-'))
@@ -15,7 +15,7 @@ function workspace(): string {
 
 const file = (name: WorkedGraph | string) => `.ostia/graphs/${name}.yaml`
 
-describe('the headless graph-engine commands', () => {
+describe('the headless graph commands', () => {
   it('GRF-C10 validate prints ok, the name and the counts', async () => {
     const dir = workspace()
     const out = await main(['validate', file('review-loop')], dir)
@@ -71,7 +71,7 @@ describe('the headless graph-engine commands', () => {
     expect(result.status).toBe('done')
     const text = await main(['dry-run', file('review-loop'), '--input', 'task=t'], dir)
     expect(text.stdout).toContain('nothing was started, asked, sent or written')
-    expect(existsSync(join(dir, '.graph-engine'))).toBe(false)
+    expect(existsSync(join(dir, '.graph'))).toBe(false)
   })
 
   it('GRF-C174 explain outlines the daily report and a dry run without mocks reports NoResult at the agent', async () => {
@@ -137,6 +137,6 @@ describe('the headless graph-engine commands', () => {
       ).stdout,
     ) as { steps: { node: string; error?: { name: string } }[] }
     expect(shape.steps.find((s) => s.node === 'test')?.error?.name).toBe('BadOutput')
-    expect(existsSync(join(dir, '.graph-engine'))).toBe(false)
+    expect(existsSync(join(dir, '.graph'))).toBe(false)
   })
 })

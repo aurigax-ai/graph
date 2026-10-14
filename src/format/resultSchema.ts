@@ -1,4 +1,4 @@
-import { RESULT_MAX_BYTES, RESULT_PROPERTIES_MAX, isRecord } from './model'
+import { RESULT_MAX_BYTES, RESULT_PROPERTIES_MAX, isRecord } from './model.ts'
 
 const SCALARS = new Set(['string', 'integer', 'number', 'boolean'])
 const RESULT_KEYS = new Set([

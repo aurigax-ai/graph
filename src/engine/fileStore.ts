@@ -13,8 +13,8 @@ import {
   writeSync,
 } from 'node:fs'
 import { join } from 'node:path'
-import { DAY_MS } from '../format/duration'
-import { NAME_PATTERN } from '../format/model'
+import { DAY_MS } from '../format/duration.ts'
+import { NAME_PATTERN } from '../format/model.ts'
 import {
   JOURNAL_LINE_MAX,
   JOURNAL_MAX_BYTES,
@@ -23,7 +23,7 @@ import {
   type Line,
   type RunKey,
   type StoredRun,
-} from './journal'
+} from './journal.ts'
 
 export const RUNS_KEPT = 50
 export const RUN_MAX_AGE_MS = 30 * DAY_MS

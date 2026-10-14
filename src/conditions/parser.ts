@@ -1,5 +1,5 @@
-import { type Problem, problem } from '../format/model'
-import { CONDITION_DEPTH_MAX, ConditionSyntaxError, type Token, tokenize } from './lexer'
+import { type Problem, problem } from '../format/model.ts'
+import { CONDITION_DEPTH_MAX, ConditionSyntaxError, type Token, tokenize } from './lexer.ts'
 
 export const ROOTS = ['state', 'trigger', 'run'] as const
 export type Root = (typeof ROOTS)[number]

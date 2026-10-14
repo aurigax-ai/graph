@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { loadGraphText } from '../format/graphFile'
-import { Engine, type GraphDefinition } from './engine'
-import { settle, testEnv } from './fakeHost'
+import { loadGraphText } from '../format/graphFile.ts'
+import { Engine, type GraphDefinition } from './engine.ts'
+import { settle, testEnv } from './fakeHost.ts'
 
 const reply = (exitCode = 0) => ({
   exitCode,

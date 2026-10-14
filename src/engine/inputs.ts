@@ -5,9 +5,9 @@ import {
   isRecord,
   problem,
   triggerKind,
-} from '../format/model'
-import { matchesType } from '../format/values'
-import type { Output } from './contract'
+} from '../format/model.ts'
+import { matchesType } from '../format/values.ts'
+import type { Output } from './contract.ts'
 
 function typed(spec: StateKeySpec, raw: string): unknown {
   switch (spec.type) {

@@ -1,10 +1,10 @@
-import Ajv2020 from 'ajv/dist/2020'
+import { Ajv2020 } from 'ajv/dist/2020.js'
 import { describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
-import { WORKED_GRAPHS, workedGraph } from '../engine/fixtures'
-import { FORMAT_KINDS } from '../kinds/catalog'
-import { loadGraphText } from './graphFile'
-import { graphJsonSchema } from './schema'
+import { WORKED_GRAPHS, workedGraph } from '../engine/fixtures.ts'
+import { FORMAT_KINDS } from '../kinds/catalog.ts'
+import { loadGraphText } from './graphFile.ts'
+import { graphJsonSchema } from './schema.ts'
 
 const BASE = {
   version: 1,

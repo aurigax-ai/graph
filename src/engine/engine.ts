@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { HOUR_MS, parseDuration } from '../format/duration'
+import { HOUR_MS, parseDuration } from '../format/duration.ts'
 import {
   CONTRACT_VERSION,
   type GraphFile,
@@ -7,13 +7,13 @@ import {
   type Problem,
   problem,
   triggerKind,
-} from '../format/model'
-import { FORMAT_KINDS, descriptorOf } from '../kinds/catalog'
-import type { Host, Output } from './contract'
-import { type BoundKind, GraphRun, NOTIFIED_ENDS, type RunLimits } from './interpreter'
-import type { JournalStore, RunKey, RunStatus } from './journal'
-import { type RunState, isEnded, newRunState, replay } from './runState'
-import { type RunSummary, summarize } from './summary'
+} from '../format/model.ts'
+import { FORMAT_KINDS, descriptorOf } from '../kinds/catalog.ts'
+import type { Host, Output } from './contract.ts'
+import { type BoundKind, GraphRun, NOTIFIED_ENDS, type RunLimits } from './interpreter.ts'
+import type { JournalStore, RunKey, RunStatus } from './journal.ts'
+import { type RunState, isEnded, newRunState, replay } from './runState.ts'
+import { type RunSummary, summarize } from './summary.ts'
 
 export const DEFAULT_LIMITS = {
   steps: 50,

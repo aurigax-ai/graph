@@ -1,5 +1,5 @@
-import { RUN_FIELDS } from '../conditions/check'
-import { type Problem, isRecord, problem } from './model'
+import { RUN_FIELDS } from '../conditions/check.ts'
+import { type Problem, isRecord, problem } from './model.ts'
 
 const TEMPLATE = /\{\{(.*?)\}\}/gs
 const PATH = /^(state|trigger|run)((?:\.[A-Za-z_][A-Za-z0-9_-]*|\[\d+\])*)$/

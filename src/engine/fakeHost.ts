@@ -1,10 +1,10 @@
-import { loadGraphText } from '../format/graphFile'
-import { type ProcessReply, type ProcessRequest, commandNode } from '../kinds/command'
-import { notifyNode, routerNode, waitNode } from '../kinds/smallKinds'
-import type { Clock, Host, NodeKind, Notice, Output } from './contract'
-import { NodeError } from './contract'
-import { Engine } from './engine'
-import { type JournalStore, MemoryJournalStore } from './journal'
+import { loadGraphText } from '../format/graphFile.ts'
+import { type ProcessReply, type ProcessRequest, commandNode } from '../kinds/command.ts'
+import { notifyNode, routerNode, waitNode } from '../kinds/smallKinds.ts'
+import type { Clock, Host, NodeKind, Notice, Output } from './contract.ts'
+import { NodeError } from './contract.ts'
+import { Engine } from './engine.ts'
+import { type JournalStore, MemoryJournalStore } from './journal.ts'
 
 export class FakeClock implements Clock {
   private timers: { at: number; fn: () => void; id: number }[] = []

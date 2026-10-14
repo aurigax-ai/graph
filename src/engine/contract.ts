@@ -1,5 +1,5 @@
 import type { z } from 'zod'
-import type { ErrorName, GraphNode, Problem } from '../format/model'
+import type { ErrorName, GraphNode, Problem } from '../format/model.ts'
 
 export type NodeEffect = 'none' | 'local' | 'agent' | 'external' | 'human'
 export type NodeSandbox = 'wrapped' | 'same' | 'refuse'

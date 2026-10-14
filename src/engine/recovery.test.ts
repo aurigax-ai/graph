@@ -2,11 +2,11 @@ import { chmodSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { loadGraphText } from '../format/graphFile'
-import { Engine } from './engine'
-import { FakeClock, settle, testEnv } from './fakeHost'
-import { FileJournalStore, GRAPH_FILE, JOURNAL_FILE, RUNS_KEPT } from './fileStore'
-import type { Line } from './journal'
+import { loadGraphText } from '../format/graphFile.ts'
+import { Engine } from './engine.ts'
+import { FakeClock, settle, testEnv } from './fakeHost.ts'
+import { FileJournalStore, GRAPH_FILE, JOURNAL_FILE, RUNS_KEPT } from './fileStore.ts'
+import type { Line } from './journal.ts'
 
 const DAY = 86_400_000
 

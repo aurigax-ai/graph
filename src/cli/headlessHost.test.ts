@@ -1,8 +1,8 @@
 import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
-import type { Notice } from '../engine/contract'
-import { contractFailures } from '../engine/contractSuite'
-import { headlessHost } from './headlessHost'
+import type { Notice } from '../engine/contract.ts'
+import { contractFailures } from '../engine/contractSuite.ts'
+import { headlessHost } from './headlessHost.ts'
 
 describe('the headless host', () => {
   it('GRF-C6 passes the host contract suite', async () => {

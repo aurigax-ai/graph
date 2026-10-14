@@ -1,4 +1,4 @@
-import { formatDuration, parseDuration } from '../format/duration'
+import { formatDuration, parseDuration } from '../format/duration.ts'
 import {
   END,
   type GraphFile,
@@ -7,9 +7,9 @@ import {
   isJoin,
   startNodes,
   triggerKind,
-} from '../format/model'
-import { descriptorOf } from '../kinds/catalog'
-import { DEFAULT_LIMITS } from './engine'
+} from '../format/model.ts'
+import { descriptorOf } from '../kinds/catalog.ts'
+import { DEFAULT_LIMITS } from './engine.ts'
 
 function triggerLine(trigger: GraphFile['on'][number]): string {
   const kind = triggerKind(trigger)

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { NodeError, type NodeKind } from './contract'
-import { settle, testEnv } from './fakeHost'
-import { MemoryJournalStore } from './journal'
+import { NodeError, type NodeKind } from './contract.ts'
+import { settle, testEnv } from './fakeHost.ts'
+import { MemoryJournalStore } from './journal.ts'
 
 const head = (state: string, start = 'a') => `version: 1
 on: [{ manual: {} }]
@@ -159,7 +159,7 @@ edges: []
       env.host.kinds.findIndex((k) => k.kind === 'approval'),
       1,
     )
-    const fresh = new (env.engine.constructor as typeof import('./engine').Engine)({
+    const fresh = new (env.engine.constructor as typeof import('./engine.ts').Engine)({
       host: env.host,
       store: new MemoryJournalStore(),
     })
@@ -360,7 +360,7 @@ edges:
       1,
       waiter,
     )
-    const engine = new (env.engine.constructor as typeof import('./engine').Engine)({
+    const engine = new (env.engine.constructor as typeof import('./engine.ts').Engine)({
       host: env.host,
       store: env.store,
     })

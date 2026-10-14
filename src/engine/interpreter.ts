@@ -1,8 +1,8 @@
-import { evaluateCondition } from '../conditions/evaluate'
-import { parseCondition } from '../conditions/parser'
-import { parseDuration } from '../format/duration'
-import { CONTINUE, END, type GraphNode, isConditional, isJoin } from '../format/model'
-import { MissingValue, render } from '../format/templates'
+import { evaluateCondition } from '../conditions/evaluate.ts'
+import { parseCondition } from '../conditions/parser.ts'
+import { parseDuration } from '../format/duration.ts'
+import { CONTINUE, END, type GraphNode, isConditional, isJoin } from '../format/model.ts'
+import { MissingValue, render } from '../format/templates.ts'
 import {
   type Host,
   type KindDescriptor,
@@ -11,7 +11,7 @@ import {
   type NodeResult,
   type NodeWait,
   type Output,
-} from './contract'
+} from './contract.ts'
 import {
   JournalError,
   type JournalStore,
@@ -19,9 +19,15 @@ import {
   type RunKey,
   type RunStatus,
   stampLine,
-} from './journal'
-import { checkOutput, computeWrites, redactOutput, stateTooLarge, thrownMessage } from './outputs'
-import { catchRule, retryDelay, retryRule } from './retry'
+} from './journal.ts'
+import {
+  checkOutput,
+  computeWrites,
+  redactOutput,
+  stateTooLarge,
+  thrownMessage,
+} from './outputs.ts'
+import { catchRule, retryDelay, retryRule } from './retry.ts'
 import {
   type ActiveNode,
   type RunState,
@@ -29,7 +35,7 @@ import {
   applyWrites,
   isEnded,
   retryKey,
-} from './runState'
+} from './runState.ts'
 
 export const STATE_LINE_EVERY = 25
 export const INTERRUPTED_PROMPT = 'You were interrupted. Finish the task and report.'

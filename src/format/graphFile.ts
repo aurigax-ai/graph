@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto'
 import { constants, closeSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs'
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { type Document, isAlias, isMap, isPair, isScalar, isSeq, parseDocument, visit } from 'yaml'
-import type { KindDescriptor } from '../engine/contract'
-import { FORMAT_KINDS } from '../kinds/catalog'
+import type { KindDescriptor } from '../engine/contract.ts'
+import { FORMAT_KINDS } from '../kinds/catalog.ts'
 import {
   type Checked,
   FILE_MAX_BYTES,
@@ -12,8 +12,8 @@ import {
   type Problem,
   isRecord,
   problem,
-} from './model'
-import { validateGraph } from './validate'
+} from './model.ts'
+import { validateGraph } from './validate.ts'
 
 export interface LoadedGraph {
   name: string

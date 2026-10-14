@@ -1,17 +1,50 @@
 {
-  "name": "@aurigax-ai/graph-engine",
+  "name": "@aurigax-ai/graph",
   "version": "0.1.0",
   "description": "A state graph interpreter for long external activities: agents, humans and commands, with a journal and reattach",
-  "license": "MIT",
+  "license": "FSL-1.1-MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aurigax-ai/graph.git"
+  },
   "type": "module",
+  "packageManager": "pnpm@11.19.0",
   "engines": {
     "node": ">=22"
   },
+  "files": ["dist", "src", "fixtures", "!src/**/*.test.ts", "!dist/**/*.test.*"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
-    "graph-engine": "./dist/bin.js"
+    "graph": "./dist/cli/bin.js"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "test": "vitest run",
+    "prepack": "pnpm run build"
   },
   "dependencies": {
     "yaml": "2.9.1",
     "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "@marcbachmann/cel-js": "8.0.0",
+    "@types/node": "24.19.1",
+    "ajv": "8.20.0",
+    "typescript": "5.9.3",
+    "vitest": "2.1.9"
   }
 }

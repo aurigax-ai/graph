@@ -1,5 +1,5 @@
-import { isRecord } from '../format/model'
-import type { Expr, Step } from './parser'
+import { isRecord } from '../format/model.ts'
+import type { Expr, Step } from './parser.ts'
 
 export type Evaluated = { ok: true; value: boolean } | { ok: false; error: string }
 

@@ -1,13 +1,13 @@
 import { spawn } from 'node:child_process'
-import type { Clock, Host, Notice } from '../engine/contract'
+import type { Clock, Host, Notice } from '../engine/contract.ts'
 import {
   type ProcessReply,
   type ProcessRequest,
   STDERR_MAX,
   STDOUT_MAX,
   commandNode,
-} from '../kinds/command'
-import { notifyNode, routerNode, waitNode } from '../kinds/smallKinds'
+} from '../kinds/command.ts'
+import { notifyNode, routerNode, waitNode } from '../kinds/smallKinds.ts'
 
 export const HEADLESS_TRIGGERS = ['manual']
 

@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { workedGraph } from '../engine/fixtures'
-import { readGraphFile } from './graphFile'
+import { workedGraph } from '../engine/fixtures.ts'
+import { readGraphFile } from './graphFile.ts'
 
 function workspace(): string {
   const dir = mkdtempSync(join(tmpdir(), 'graph-file-'))

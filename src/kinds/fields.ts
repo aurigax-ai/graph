@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { parseDuration } from '../format/duration'
+import { parseDuration } from '../format/duration.ts'
 
 export function hasControl(value: string): boolean {
   for (const ch of value) {

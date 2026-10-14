@@ -1,9 +1,9 @@
 import type { z } from 'zod'
-import { checkCondition } from '../conditions/check'
-import { parseCondition } from '../conditions/parser'
-import type { KindDescriptor } from '../engine/contract'
-import { parseDuration } from './duration'
-import { arcs, cycles, parallelRegions, reachable, sourcesOf, targetsOf } from './graphShape'
+import { checkCondition } from '../conditions/check.ts'
+import { parseCondition } from '../conditions/parser.ts'
+import type { KindDescriptor } from '../engine/contract.ts'
+import { parseDuration } from './duration.ts'
+import { arcs, cycles, parallelRegions, reachable, sourcesOf, targetsOf } from './graphShape.ts'
 import {
   ALL_ERRORS,
   CONTINUE,
@@ -23,8 +23,8 @@ import {
   isRecord,
   problem,
   startNodes,
-} from './model'
-import { checkResultSchema } from './resultSchema'
+} from './model.ts'
+import { checkResultSchema } from './resultSchema.ts'
 import {
   EDGE_SCHEMAS,
   LIMIT_CEILINGS,
@@ -35,9 +35,9 @@ import {
   retrySchema,
   stateKeySchema,
   topSchema,
-} from './schema'
-import { checkTemplates } from './templates'
-import { matchesType } from './values'
+} from './schema.ts'
+import { checkTemplates } from './templates.ts'
+import { matchesType } from './values.ts'
 
 type Issues = z.core.$ZodIssue[]
 

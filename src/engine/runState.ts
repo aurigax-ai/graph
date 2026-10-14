@@ -1,6 +1,12 @@
-import { type GraphFile, isJoin, startNodes } from '../format/model'
-import type { NodeWait, Output, StartedRecord } from './contract'
-import { ENDED_STATUSES, type Line, type NodeFailure, type RunStatus, type Write } from './journal'
+import { type GraphFile, isJoin, startNodes } from '../format/model.ts'
+import type { NodeWait, Output, StartedRecord } from './contract.ts'
+import {
+  ENDED_STATUSES,
+  type Line,
+  type NodeFailure,
+  type RunStatus,
+  type Write,
+} from './journal.ts'
 
 export type NodePhase = 'running' | 'waiting' | 'retrying' | 'interrupted'
 

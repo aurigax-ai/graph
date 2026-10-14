@@ -1,12 +1,12 @@
 import { z } from 'zod'
-import type { KindDescriptor } from '../engine/contract'
-import { dryRun, parseMocks } from '../engine/dryRun'
-import { explain } from '../engine/explain'
-import { parseInputs } from '../engine/inputs'
-import { readGraphFile } from '../format/graphFile'
-import type { Problem } from '../format/model'
-import { graphJsonSchema } from '../format/schema'
-import { FORMAT_KINDS } from '../kinds/catalog'
+import type { KindDescriptor } from '../engine/contract.ts'
+import { dryRun, parseMocks } from '../engine/dryRun.ts'
+import { explain } from '../engine/explain.ts'
+import { parseInputs } from '../engine/inputs.ts'
+import { readGraphFile } from '../format/graphFile.ts'
+import type { Problem } from '../format/model.ts'
+import { graphJsonSchema } from '../format/schema.ts'
+import { FORMAT_KINDS } from '../kinds/catalog.ts'
 
 export interface CommandOutput {
   exitCode: number

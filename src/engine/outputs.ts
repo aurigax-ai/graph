@@ -1,10 +1,10 @@
-import { type GraphNode, STATE_MAX_BYTES, type StateKeySpec, isRecord } from '../format/model'
-import { resultErrors } from '../format/resultSchema'
-import { readField, writeValue } from '../format/values'
-import type { KindDescriptor, Output } from './contract'
-import { NodeError } from './contract'
-import type { Write } from './journal'
-import { applyWrites } from './runState'
+import { type GraphNode, STATE_MAX_BYTES, type StateKeySpec, isRecord } from '../format/model.ts'
+import { resultErrors } from '../format/resultSchema.ts'
+import { readField, writeValue } from '../format/values.ts'
+import type { KindDescriptor, Output } from './contract.ts'
+import { NodeError } from './contract.ts'
+import type { Write } from './journal.ts'
+import { applyWrites } from './runState.ts'
 
 export const THROWN_MESSAGE_MAX = 240
 

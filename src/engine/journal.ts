@@ -1,5 +1,5 @@
-import { JOURNAL_VERSION } from '../format/model'
-import type { NodeWait, Output } from './contract'
+import { JOURNAL_VERSION } from '../format/model.ts'
+import type { NodeWait, Output } from './contract.ts'
 
 export type RunStatus =
   | 'running'

@@ -1,7 +1,7 @@
 import { z } from 'zod'
-import type { KindDescriptor, NodeKind, Notice, Output } from '../engine/contract'
-import { DAY_MS, parseDuration } from '../format/duration'
-import { RFC3339, duration, line, text } from './fields'
+import type { KindDescriptor, NodeKind, Notice, Output } from '../engine/contract.ts'
+import { DAY_MS, parseDuration } from '../format/duration.ts'
+import { RFC3339, duration, line, text } from './fields.ts'
 
 export const WAIT_MAX_MS = 30 * DAY_MS
 export const NOTIFY_TITLE_MAX = 80
