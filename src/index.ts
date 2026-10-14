@@ -88,3 +88,26 @@ export {
   type SchedulerOptions,
   TriggerScheduler,
 } from './triggers/scheduler.ts'
+export {
+  type ConnectorCatalogEntry,
+  type ConnectorHostInfo,
+  type ConnectorUse,
+  connectorCatalog,
+  connectorProblems,
+  connectorUses,
+} from './connectors/check.ts'
+export { type ConnectorHost, connectorNode } from './connectors/connectorNode.ts'
+export {
+  type ConnectionKind,
+  type ConnectorCall,
+  type ConnectorOperation,
+  type McpCall,
+  type McpReply,
+  type NativeConnector,
+  type OperationEffect,
+  type ParsedUse,
+  type ResolvedConnection,
+  operationEffect,
+  parseUse,
+} from './connectors/contract.ts'
+export { HTTP_RESPONSE_MAX, HTTP_TIMEOUT_MS, httpConnector, requestUrl } from './connectors/http.ts'
