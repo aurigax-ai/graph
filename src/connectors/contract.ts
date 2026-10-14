@@ -72,3 +72,5 @@ export function parseUse(use: string): ParsedUse | null {
 export function operationEffect(op: ConnectorOperation, input: Output): OperationEffect {
   return typeof op.effect === 'function' ? op.effect(input) : op.effect
 }
+
+export class ConnectorError extends Error {}
