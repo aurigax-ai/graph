@@ -6,7 +6,15 @@ const ROOT = resolve(__dirname, '..')
 const PACKAGE = resolve(ROOT, '..')
 const IMPORT =
   /(?:^|\n)\s*(?:import|export)[^'"]*?from\s+['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)|require\(\s*['"]([^'"]+)['"]\s*\)/g
-const ALLOWED_PACKAGES = ['yaml', 'zod', 'vitest', 'ajv', '@marcbachmann/cel-js']
+const ALLOWED_PACKAGES = [
+  'yaml',
+  'zod',
+  'croner',
+  'picomatch',
+  'vitest',
+  'ajv',
+  '@marcbachmann/cel-js',
+]
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -39,6 +47,11 @@ describe('the engine package stands alone', () => {
     const manifest = JSON.parse(readFileSync(join(PACKAGE, 'package.json'), 'utf8')) as {
       dependencies: Record<string, string>
     }
-    expect(Object.keys(manifest.dependencies).sort()).toEqual(['yaml', 'zod'])
+    expect(Object.keys(manifest.dependencies).sort()).toEqual([
+      'croner',
+      'picomatch',
+      'yaml',
+      'zod',
+    ])
   })
 })

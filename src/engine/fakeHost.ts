@@ -141,7 +141,12 @@ export interface TestEnv extends FakeHostState {
 }
 
 export function testEnv(
-  opts: { store?: JournalStore; clock?: FakeClock; kinds?: (s: FakeHostState) => NodeKind[] } = {},
+  opts: {
+    store?: JournalStore
+    clock?: FakeClock
+    kinds?: (s: FakeHostState) => NodeKind[]
+    triggers?: string[]
+  } = {},
 ): TestEnv {
   const state: FakeHostState = {
     clock: opts.clock ?? new FakeClock(),
@@ -177,7 +182,7 @@ export function testEnv(
     name: 'test',
     contract: 1,
     kinds,
-    triggers: ['manual'],
+    triggers: opts.triggers ?? ['manual'],
     clock: state.clock,
     notify: (n) => state.notices.push(n),
     redact: (texts) => (state.redact ? state.redact(texts) : Promise.resolve(texts)),

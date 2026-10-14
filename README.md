@@ -56,6 +56,17 @@ Conditions are a small subset of CEL (`state.exit == 0`, `'bug' in state.labels`
 code. Templates (`{{state.task}}`) are filled from the state the same way. `fixtures/` holds three
 complete examples.
 
+## Triggers
+
+A graph starts from the triggers under `on`: `manual`, `schedule` (`every: 15m` or a five-field
+`cron`, with `catchUp` to run once for times missed while the host was down), `files` (globs
+relative to the workspace folder), `command` (a command that ended, by `exit`) and `agent` (an agent
+that `stopped` or is `waiting`). The engine reads them: `TriggerScheduler` keeps the schedules on the
+host's clock, `firedBy` tells which trigger an event fires and with what payload (`trigger.*` in
+the graph), and `PathBatch` collects file changes made within a second into one event. The host
+watches the files, commands and agents; `concurrency: skip` or `queue` decides what happens when
+a run is still active. The headless command runs `manual` only.
+
 ## As a library
 
 A host gives the engine its node kinds, a clock and a way to notify; the engine keeps the runs.

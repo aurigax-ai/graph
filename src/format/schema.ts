@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { KindDescriptor } from '../engine/contract.ts'
 import { line } from '../kinds/fields.ts'
+import { cronValid } from '../triggers/schedule.ts'
 import { HOUR_MS, MINUTE_MS, parseDuration } from './duration.ts'
 import {
   ALL_ERRORS,
@@ -71,19 +72,6 @@ export const nodeBaseSchema = z.strictObject({
   catch: z.array(catchSchema).min(1).max(CATCH_MAX).optional(),
 })
 
-const FIVE_FIELD_CRON = /^\s*(\S+\s+){4}\S+\s*$/
-const CRON_FIELD = /^(\*|\d+(-\d+)?)(\/\d+)?(,(\*|\d+(-\d+)?)(\/\d+)?)*$/
-
-function cronFields(value: string): boolean {
-  return (
-    FIVE_FIELD_CRON.test(value) &&
-    value
-      .trim()
-      .split(/\s+/)
-      .every((f) => CRON_FIELD.test(f))
-  )
-}
-
 function relativeGlob(value: string): boolean {
   return (
     value.length > 0 &&
@@ -102,7 +90,7 @@ export const TRIGGER_SCHEMAS = {
     .strictObject({
       cron: z
         .string()
-        .refine(cronFields, 'five cron fields: minute hour day month weekday')
+        .refine(cronValid, 'five cron fields: minute hour day month weekday')
         .optional(),
       every: z
         .string()
@@ -125,7 +113,7 @@ export const TRIGGER_SCHEMAS = {
   }),
   command: z.strictObject({ exit: z.enum(['any', 'zero', 'nonzero']).optional() }),
   agent: z.strictObject({
-    state: z.literal('stopped'),
+    state: z.enum(['stopped', 'waiting']),
     agent: z.enum(['claude', 'codex']).optional(),
   }),
 } as const
