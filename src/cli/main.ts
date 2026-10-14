@@ -15,7 +15,7 @@ import {
 } from './commands.ts'
 import { headlessHost } from './headlessHost.ts'
 
-const USAGE = `usage: graph <command>
+const USAGE = `usage: wire <command>
   validate <file>                 check a graph file
   schema                          print the graph file's JSON Schema
   nodes                           list the node kinds this host runs
@@ -105,7 +105,7 @@ export async function main(argv: string[], cwd = process.cwd()): Promise<Command
   const [command, ...rest] = argv
   const parsed = flags(rest)
   const file = parsed.rest[0] ? resolve(cwd, parsed.rest[0]) : undefined
-  const data = resolve(cwd, parsed.values.data?.[0] ?? '.graph/runs')
+  const data = resolve(cwd, parsed.values.data?.[0] ?? '.wire/runs')
   switch (command) {
     case 'validate':
       return file ? validateCommand(file, cwd) : { exitCode: 2, stdout: `${USAGE}\n` }

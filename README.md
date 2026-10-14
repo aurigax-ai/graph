@@ -1,4 +1,4 @@
-# @aurigax-ai/graph
+# @aurigax-ai/wire
 
 A state graph interpreter for long activities that happen outside the process: coding agents,
 questions for a human, commands and waits. A graph is a YAML file of nodes, edges and a typed
@@ -6,12 +6,13 @@ state. Every step is written to a journal, so a run survives a restart: a node t
 is picked up again, and a node that was cut off starts again or waits for a human's choice.
 
 It is the engine behind the Graphs feature of [Ostia](https://github.com/aurigax-ai/ostia), and
-it runs on its own as a command or a library.
+it runs on its own as a command or a library. Up to 0.1.1 it was published as
+`@aurigax-ai/graph`.
 
 ## Install
 
 ```sh
-pnpm add @aurigax-ai/graph
+pnpm add @aurigax-ai/wire
 ```
 
 Node 22 or later.
@@ -19,15 +20,15 @@ Node 22 or later.
 ## The command
 
 ```sh
-graph validate review.yaml
-graph explain review.yaml
-graph dry-run review.yaml --input task="fix the total" --mock review='{"verdict":"pass"}'
-graph run review.yaml --input task="fix the total"
-graph show <run>
+wire validate review.yaml
+wire explain review.yaml
+wire dry-run review.yaml --input task="fix the total" --mock review='{"verdict":"pass"}'
+wire run review.yaml --input task="fix the total"
+wire show <run>
 ```
 
 `schema` prints the graph file's JSON Schema and `nodes` lists the node kinds the headless host
-runs. `run` keeps its runs under `.graph/runs` in the current folder (`--data <dir>` to change it).
+runs. `run` keeps its runs under `.wire/runs` in the current folder (`--data <dir>` to change it).
 The headless host runs `command`, `router`, `wait` and `notify` nodes; nodes that need an agent or
 a human are for a host that has them.
 
@@ -93,7 +94,7 @@ secret.
 A host gives the engine its node kinds, a clock and a way to notify; the engine keeps the runs.
 
 ```ts
-import { Engine, FileJournalStore, commandNode, readGraphFile, realClock } from '@aurigax-ai/graph'
+import { Engine, FileJournalStore, commandNode, readGraphFile, realClock } from '@aurigax-ai/wire'
 
 const engine = new Engine({
   host: { name: 'my-host', contract: 1, kinds: [commandNode(runner)], triggers: ['manual'],
@@ -104,7 +105,7 @@ const engine = new Engine({
 ```
 
 A node kind returns `done` with its output or `waiting` with what it waits for; the wait is stored,
-and `resume` completes it when the event arrives, also after a restart. `@aurigax-ai/graph/testing`
+and `resume` completes it when the event arrives, also after a restart. `@aurigax-ai/wire/testing`
 has a fake clock, fake agent and approval kinds, and `contractFailures`, the suite a host's kinds
 must pass.
 

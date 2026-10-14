@@ -25,7 +25,7 @@ function sources(dir: string): string[] {
 }
 
 describe('the engine package stands alone', () => {
-  it('GRF-C180 no import names electron, src/, the extension SDK or a path outside graph-engine/', () => {
+  it('GRF-C180 no import names electron, src/, the extension SDK or a path outside the package', () => {
     const bad: string[] = []
     for (const file of sources(ROOT)) {
       const text = readFileSync(file, 'utf8')

@@ -1,11 +1,11 @@
 {
-  "name": "@aurigax-ai/graph",
-  "version": "0.1.1",
+  "name": "@aurigax-ai/wire",
+  "version": "0.1.2",
   "description": "A state graph interpreter for long external activities: agents, humans and commands, with a journal and reattach",
   "license": "FSL-1.1-MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/aurigax-ai/graph.git"
+    "url": "git+https://github.com/aurigax-ai/wire.git"
   },
   "type": "module",
   "packageManager": "pnpm@11.19.0",
@@ -25,7 +25,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "graph": "./dist/cli/bin.js"
+    "wire": "./dist/cli/bin.js"
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
