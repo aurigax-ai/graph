@@ -1,6 +1,6 @@
 {
   "name": "@aurigax-ai/graph",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A state graph interpreter for long external activities: agents, humans and commands, with a journal and reattach",
   "license": "FSL-1.1-MIT",
   "repository": {
