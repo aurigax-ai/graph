@@ -1,6 +1,7 @@
 import { NodeError, type NodeKind, type Output } from '../engine/contract.ts'
 import type { Clock } from '../engine/contract.ts'
 import {
+  ConnectorError,
   type McpCall,
   type NativeConnector,
   type ResolvedConnection,
@@ -68,7 +69,9 @@ async function callNative(
   }
   const out = await connector
     .call({ operation, input: parsed.data as Output, connection, signal, clock: host.clock })
-    .catch((err: unknown) => failed(err instanceof Error ? err.message : String(err)))
+    .catch((err: unknown) =>
+      failed(err instanceof ConnectorError ? err.message : `${id}.${operation} failed`),
+    )
   const checked = op.output.safeParse(out.data)
   if (!checked.success) failed(`${id}.${operation} returned bad data: ${issues(checked.error)}`)
   return { ok: out.ok !== false, data: checked.data }

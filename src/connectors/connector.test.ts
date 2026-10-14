@@ -114,4 +114,36 @@ edges: [{ from: a, to: b }, { from: b, to: c }]
     expect(catalog).toContain('"request"')
     expect(catalog).not.toContain('secret"')
   })
+
+  it('a native connector that throws its own words is ConnectorFailed with a fixed message', async () => {
+    const SECRET = ['sk', 'live', 'z'.repeat(24)].join('_')
+    const env = testEnv({
+      kinds: (s) => [
+        connectorNode({
+          clock: s.clock,
+          native: [
+            {
+              ...httpConnector(),
+              id: 'leaky',
+              connections: [],
+              call: async () => {
+                throw new Error(`boom ${SECRET}`)
+              },
+            },
+          ],
+          connection: async () => null,
+        }),
+      ],
+    })
+    const id = env.start(
+      text(
+        '{ id: a, kind: connector, with: { use: "leaky.request", input: { path: "/x" } }, out: { error.message: err }, catch: [{ errors: [ConnectorFailed], then: continue }] }',
+      ),
+    )
+    await settle()
+    expect(env.run(id).state.state.err).toBe('leaky.request failed')
+    expect(
+      JSON.stringify(env.store.read({ scope: 'w1', graph: 'g', runId: id })?.lines ?? []),
+    ).not.toContain(SECRET)
+  })
 })

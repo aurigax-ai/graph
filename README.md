@@ -75,10 +75,15 @@ outputs are `ok` and `data` (for MCP, `text` and, when the tool returns it, `str
 raises `ConnectorFailed`. A graph names a `connection` by name only: the host keeps the connection's
 fields and secrets and hands them to the connector for one call, so the file never holds a secret.
 
-The one native connector is `http`. Its connection holds the base URL and the auth (`bearer`,
-`header` or `basic`); a node gives `method`, `path`, `query` and a JSON `body`. A request never
-leaves the connection's origin, a redirect to another origin is refused, a response over 1 MiB fails
-the node and a call stops after 30 s. `GET` is a read and every other method a write
+The one native connector is `http`. Its connection holds the base URL (with no user name or
+password in it) and the auth (`bearer`, `header` or `basic`); a node gives `method`, `path`, `query`
+and a JSON `body`. The path stays under the base URL: a `..` segment, raw or percent-encoded, an
+encoded slash or a backslash is refused, and so is a redirect to another origin or outside the base
+path. A response over 1 MiB fails the node and a call stops after 30 s. A field or secret with a
+control character is refused before anything is sent, and a failure is reported with a fixed
+message (`http: timeout after 30 s`, `http: connection refused`, `http: request failed`, …), never
+the network library's own text, so a secret can't reach the run's journal through an error. `GET`
+is a read and every other method a write
 (`connectorUses` tells a host which, for its approval view). `connectorProblems` checks a graph
 against the host's connectors and connections, and `connectorCatalog` lists them without a URL or
 secret.
