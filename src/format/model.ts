@@ -69,7 +69,7 @@ export interface CommandTrigger {
   command: { exit?: 'any' | 'zero' | 'nonzero' }
 }
 export interface AgentTrigger {
-  agent: { state: 'stopped'; agent?: 'claude' | 'codex' }
+  agent: { state: 'stopped' | 'waiting'; agent?: 'claude' | 'codex' }
 }
 export type Trigger = ManualTrigger | ScheduleTrigger | FilesTrigger | CommandTrigger | AgentTrigger
 export const TRIGGER_KINDS = ['manual', 'schedule', 'files', 'command', 'agent'] as const

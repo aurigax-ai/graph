@@ -73,3 +73,18 @@ export { FORMAT_KINDS, descriptorOf } from './kinds/catalog.ts'
 export { type ProcessRunner, commandNode } from './kinds/command.ts'
 export { DEFAULT_CHOICES } from './kinds/humanKinds.ts'
 export { notifyNode, routerNode, waitNode } from './kinds/smallKinds.ts'
+export {
+  type AgentState,
+  type TriggerEvent,
+  firedBy,
+  liveTriggers,
+  triggerPayload,
+} from './triggers/match.ts'
+export { PATH_BATCH_MS, PathBatch } from './triggers/pathBatch.ts'
+export { cronValid, nextScheduled } from './triggers/schedule.ts'
+export {
+  type ScheduleMemory,
+  type ScheduledGraph,
+  type SchedulerOptions,
+  TriggerScheduler,
+} from './triggers/scheduler.ts'
