@@ -67,6 +67,22 @@ the graph), and `PathBatch` collects file changes made within a second into one 
 watches the files, commands and agents; `concurrency: skip` or `queue` decides what happens when
 a run is still active. The headless command runs `manual` only.
 
+## Connectors
+
+A `connector` node calls something outside: `use: mcp:<server>/<tool>` calls a tool of an MCP
+server the host has set up, and `use: <connector>.<operation>` calls a native connector. Its
+outputs are `ok` and `data` (for MCP, `text` and, when the tool returns it, `structured`); a failure
+raises `ConnectorFailed`. A graph names a `connection` by name only: the host keeps the connection's
+fields and secrets and hands them to the connector for one call, so the file never holds a secret.
+
+The one native connector is `http`. Its connection holds the base URL and the auth (`bearer`,
+`header` or `basic`); a node gives `method`, `path`, `query` and a JSON `body`. A request never
+leaves the connection's origin, a redirect to another origin is refused, a response over 1 MiB fails
+the node and a call stops after 30 s. `GET` is a read and every other method a write
+(`connectorUses` tells a host which, for its approval view). `connectorProblems` checks a graph
+against the host's connectors and connections, and `connectorCatalog` lists them without a URL or
+secret.
+
 ## As a library
 
 A host gives the engine its node kinds, a clock and a way to notify; the engine keeps the runs.
