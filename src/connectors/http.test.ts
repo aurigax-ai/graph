@@ -185,9 +185,9 @@ describe('the http connector', () => {
       HTTP_ERRORS.invalid,
     )
     let hits = 0
-    const base = await serve((req, res) => {
+    const base = await serve((_req, res) => {
       hits++
-      res.end(req.url)
+      res.end('ok')
     })
     const env = harness(connection(`${base}/v1`))
     const id = env.start(graph('{ path: "/%2e%2e/admin" }'))
