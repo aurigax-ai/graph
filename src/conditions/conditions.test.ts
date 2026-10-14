@@ -30,18 +30,20 @@ function value(text: string): boolean {
   return result.value
 }
 
+const CEL_TABLE = [
+  ['state.exit == 0', true],
+  ["state.review.contains('VERDICT: pass')", true],
+  ["'bug' in state.labels", true],
+  ['size(state.notes) >= 3 && !state.done', true],
+  ['run.visits.implement >= 4', true],
+  ['!has(state.absent)', true],
+  ["state.result.verdict in ['pass', 'skip']", true],
+  ["state.result.verdict in ['pass']", false],
+  ['state.exit != 0 || size(state.labels) == 2', true],
+] as const
+
 describe('conditions', () => {
-  it.each([
-    ['state.exit == 0', true],
-    ["state.review.contains('VERDICT: pass')", true],
-    ["'bug' in state.labels", true],
-    ['size(state.notes) >= 3 && !state.done', true],
-    ['run.visits.implement >= 4', true],
-    ['!has(state.absent)', true],
-    ["state.result.verdict in ['pass', 'skip']", true],
-    ["state.result.verdict in ['pass']", false],
-    ['state.exit != 0 || size(state.labels) == 2', true],
-  ])('GRF-C27 %s gives the listed value, as cel-js does', (text, expected) => {
+  it.each(CEL_TABLE)('GRF-C27 %s gives the listed value, as cel-js does', (text, expected) => {
     expect(value(text)).toBe(expected)
     expect(celEvaluate(text, scope)).toBe(expected)
   })

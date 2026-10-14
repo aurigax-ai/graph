@@ -39,6 +39,13 @@ function codes(graph: unknown): string[] {
 const nodes = (g: Graph) => g.nodes as Graph[]
 const edges = (g: Graph) => g.edges as unknown[]
 
+const BAD_TEMPLATES = [
+  ['{{ state.x | upper }}', 'bad-template'],
+  ['{{ state.a + 1 }}', 'bad-template'],
+  ['{{ env.HOME }}', 'bad-template'],
+  ['{{ state.missing }}', 'unknown-state-key'],
+] as const
+
 describe('validating a graph', () => {
   it('accepts the base graph', () => {
     expect(codes(BASE)).toEqual([])
@@ -156,12 +163,7 @@ describe('validating a graph', () => {
     ).toEqual(['append-needs-array'])
   })
 
-  it.each([
-    ['{{ state.x | upper }}', 'bad-template'],
-    ['{{ state.a + 1 }}', 'bad-template'],
-    ['{{ env.HOME }}', 'bad-template'],
-    ['{{ state.missing }}', 'unknown-state-key'],
-  ])('GRF-C25 the template %s is %s with the node id', (template, code) => {
+  it.each(BAD_TEMPLATES)('GRF-C25 the template %s is %s with the node id', (template, code) => {
     const found = problemsOf(
       variant((g) => {
         nodes(g)[0].with = { run: ['echo', template] }
