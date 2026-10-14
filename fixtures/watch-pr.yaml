@@ -1,0 +1,52 @@
+version: 1
+description: Poll a pull request's checks until they finish, then tell the agent that started this to continue, or start one to fix them.
+on:
+  - manual: { agents: true, input: [pr] }
+concurrency: skip
+start: checks
+state:
+  pr:     { type: string }
+  exit:   { type: integer, default: -1 }
+  checks: { type: string, default: "", max: 4000, keep: tail }
+limits: { steps: 200, agents: 1, time: 6h }
+nodes:
+  - id: checks
+    kind: command
+    timeout: 2m
+    with: { run: [gh, pr, checks, "{{state.pr}}"] }
+    out: { exit: exit, stdout: checks }
+    retry: [{ errors: [Timeout], maxAttempts: 3, interval: 30s, backoff: 2 }]
+
+  - id: outcome
+    kind: router
+
+  - id: pause
+    kind: wait
+    with: { for: 2m }
+
+  - id: continue
+    kind: agent
+    with:
+      mode: message
+      to: trigger
+      wait: none
+      prompt: "Pull request {{state.pr}}: every check passed. Continue with your next step."
+
+  - id: fix
+    kind: agent
+    timeout: 45m
+    with:
+      mode: start
+      agent: claude
+      prompt: |
+        The checks of pull request {{state.pr}} failed. Find the cause, fix it and push.
+        {{state.checks}}
+
+edges:
+  - { from: checks, to: outcome }
+  - from: outcome
+    when:
+      - { if: "state.exit == 8", to: pause }
+      - { if: "state.exit == 0", to: continue }
+    else: fix
+  - { from: pause, to: checks }

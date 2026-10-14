@@ -1,0 +1,54 @@
+version: 1
+description: On weekday mornings, read open pull requests and issues through the tracker's MCP server, have an agent write a report, and notify.
+on:
+  - schedule: { cron: "0 9 * * 1-5", catchUp: true }
+  - manual: {}
+start: [pulls, issues]
+state:
+  pulls:    { type: string, default: "", max: 6000, keep: head }
+  issues:   { type: string, default: "", max: 6000, keep: head }
+  problems: { type: array, items: { type: object }, merge: append, default: [] }
+  report:   { type: string, default: "", max: 400 }
+limits: { steps: 10, agents: 1, runsPerHour: 2, time: 1h }
+nodes:
+  - id: pulls
+    kind: connector
+    with:
+      use: mcp:tracker/list_pull_requests
+      input: { owner: example-org, repo: example-app, state: open }
+    out: { data.text: pulls, error: problems }
+    catch: [{ errors: [All], then: continue }]
+
+  - id: issues
+    kind: connector
+    with:
+      use: mcp:tracker/list_issues
+      input: { owner: example-org, repo: example-app, state: open }
+    out: { data.text: issues, error: problems }
+    catch: [{ errors: [All], then: continue }]
+
+  - id: write
+    kind: agent
+    timeout: 20m
+    with:
+      mode: start
+      agent: claude
+      prompt: |
+        Write today's status report as report.md in $OSTIA_ARTIFACTS from the data below.
+        Group by what needs a decision, what is blocked and what moved. Do not change any other file.
+        Open pull requests: {{state.pulls}}
+        Open issues: {{state.issues}}
+        Data that could not be read: {{state.problems}}
+    result:
+      type: object
+      properties: { headline: { type: string } }
+      required: [headline]
+    out: { result.headline: report }
+
+  - id: tell
+    kind: notify
+    with: { title: Daily report, body: "{{state.report}}" }
+
+edges:
+  - { from: [pulls, issues], to: write }
+  - { from: write, to: tell }

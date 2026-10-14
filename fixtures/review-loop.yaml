@@ -1,0 +1,116 @@
+version: 1
+description: Implement a task, test it, have a second agent review it, repeat until it passes, then ask before opening a pull request.
+on:
+  - manual: { agents: true, input: [task] }
+start: implement
+state:
+  task:     { type: string }
+  summary:  { type: string, default: "", max: 3000 }
+  testExit: { type: integer, default: -1 }
+  testOut:  { type: string, default: "", max: 4000, keep: tail }
+  verdict:  { type: string, enum: [pass, fail], default: fail }
+  findings: { type: array, items: { type: string }, default: [] }
+  decision: { type: string, default: "" }
+limits: { steps: 40, agents: 10, time: 8h }
+nodes:
+  - id: implement
+    kind: agent
+    timeout: 45m
+    with:
+      mode: start
+      agent: claude
+      prompt: |
+        Implement this task in the current folder.
+        Task: {{state.task}}
+    result:
+      type: object
+      properties: { summary: { type: string } }
+      required: [summary]
+    out: { result.summary: summary }
+
+  - id: test
+    kind: command
+    timeout: 10m
+    with: { run: [pnpm, test] }
+    out: { exit: testExit, stdout: testOut }
+
+  - id: review
+    kind: agent
+    timeout: 30m
+    with:
+      mode: start
+      agent: codex
+      prompt: |
+        Review the uncommitted changes for this task. Do not edit files.
+        Task: {{state.task}}
+        The implementer wrote: {{state.summary}}
+    result:
+      type: object
+      properties:
+        verdict:  { type: string, enum: [pass, fail] }
+        findings: { type: array, items: { type: string } }
+      required: [verdict, findings]
+    out: { result.verdict: verdict, result.findings: findings }
+    retry: [{ errors: [NoResult], maxAttempts: 1 }]
+
+  - id: verdict
+    kind: router
+
+  - id: fix
+    kind: agent
+    timeout: 45m
+    with:
+      mode: continue
+      from: implement
+      prompt: |
+        The tests or the review did not pass.
+        Test exit code: {{state.testExit}}
+        Test output (end): {{state.testOut}}
+        Review findings: {{state.findings}}
+        Fix them.
+    result:
+      type: object
+      properties: { summary: { type: string } }
+      required: [summary]
+    out: { result.summary: summary }
+
+  - id: ask
+    kind: approval
+    with:
+      question: "Open a pull request for: {{state.task}}?"
+      context: "{{state.summary}}"
+      choices: [Open it, Stop here]
+    out: { answer: decision }
+
+  - id: open-pr
+    kind: agent
+    once: true
+    with:
+      mode: continue
+      from: implement
+      prompt: Commit the current changes on a new branch and open a pull request for this task.
+
+  - id: gave-up
+    kind: notify
+    with:
+      title: Review loop stopped
+      body: "No passing review after 4 rounds: {{state.task}}"
+
+edges:
+  - { from: implement, to: test }
+  - from: test
+    when:
+      - { if: "state.testExit == 0", to: review }
+      - { if: "run.visits.fix >= 3", to: gave-up }
+    else: fix
+  - { from: fix, to: test }
+  - { from: review, to: verdict }
+  - from: verdict
+    when:
+      - { if: "state.verdict == 'pass'", to: ask }
+      - { if: "run.visits.fix >= 3", to: gave-up }
+    else: fix
+  - from: ask
+    when:
+      - { if: "state.decision == 'Open it'", to: open-pr }
+    else: end

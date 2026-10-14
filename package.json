@@ -1,0 +1,17 @@
+{
+  "name": "@aurigax-ai/graph-engine",
+  "version": "0.1.0",
+  "description": "A state graph interpreter for long external activities: agents, humans and commands, with a journal and reattach",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "graph-engine": "./dist/bin.js"
+  },
+  "dependencies": {
+    "yaml": "2.9.1",
+    "zod": "4.6.5"
+  }
+}
