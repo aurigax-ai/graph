@@ -1,30 +1,26 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { NodeKind } from '../engine/contract.ts'
-import {
-  FakeClock,
-  type FakeHostState,
-  fakeAgentKind,
-  fakeApprovalKind,
-  testEnv,
-} from '../engine/fakeHost.ts'
+import { type FakeHostState, fakeAgentKind, fakeApprovalKind, testEnv } from '../engine/fakeHost.ts'
 import { RuntimeClient } from './client.ts'
-import { PAIRING_MS } from './pairing.ts'
 import type { RuntimePaths } from './paths.ts'
 import { scopeKey } from './registry.ts'
 import type { Runtime, RuntimeOptions } from './runtime.ts'
 import { cliClient, pairedClient, runtimePlace, testRuntime } from './testRuntime.ts'
-import { RIGHTS, type Right, Tokens } from './tokens.ts'
+import { RIGHTS, type Right, Tokens, provisionToken, readProvisionedToken } from './tokens.ts'
 import { type WorkerTask, serveKinds } from './workerClient.ts'
 
 const BIN = join(import.meta.dirname, '..', '..', 'dist', 'cli', 'bin.js')
@@ -314,42 +310,74 @@ describe('workers and pairing', () => {
     })
   })
 
-  it('GRF-C213 a pairing the client confirms returns its token once, and the token works on the next connection', async () => {
-    const { paths } = runtimePlace()
-    await started(paths)
-    const cli = await track(cliClient(paths))
-    const { id } = await cli.call<{ id: string }>('pair.request', {
-      client: 'ostia',
-      rights: ['enable', 'control', 'observe'],
-    })
-    const paired = await cli.call<{ token: string; rights: string[] }>('pair.confirm', { id })
-    expect(paired.rights).toEqual(['enable', 'control', 'observe'])
-    await expect(cli.call('pair.confirm', { id })).rejects.toThrow('unknown-pairing')
-    const next = await track(RuntimeClient.connect({ socket: paths.socket, token: paired.token }))
-    expect(next.hello).toMatchObject({ client: 'ostia', rights: ['enable', 'control', 'observe'] })
-    expect(readFileSync(join(paths.data, 'tokens.json'), 'utf8')).not.toContain(paired.token)
+  it('GRF-C232 a token file written before the runtime starts gives its client enable and control, and the contract has no pairing call', async () => {
+    const { env, paths } = runtimePlace()
+    const token = provisionToken(paths.data, 'ostia', RIGHTS)
+    expect(statSync(join(paths.data, 'tokens', 'ostia')).mode & 0o777).toBe(0o600)
+    const start = await output(wire(env, ['runtime', 'start']))
+    expect(JSON.parse(start.stdout)).toMatchObject({ ok: true })
+    const ostia = await track(RuntimeClient.connect({ socket: paths.socket, token }))
+    expect(ostia.hello).toMatchObject({ client: 'ostia' })
+    expect(ostia.hello.rights).toEqual(expect.arrayContaining(['enable', 'control', 'worker']))
+    expect(readProvisionedToken(paths.data, 'ostia')).toBe(token)
+
+    const later = provisionToken(paths.data, 'second', ['observe', 'control'])
+    const { pid } = await ostia.call<{ pid: number }>('runtime.status')
+    process.kill(pid, 'SIGHUP')
+    const deadline = Date.now() + 5_000
+    for (;;) {
+      try {
+        const second = await track(RuntimeClient.connect({ socket: paths.socket, token: later }))
+        expect(second.hello.rights).toEqual(['observe', 'control'])
+        break
+      } catch (err) {
+        if (Date.now() > deadline) throw err
+        await new Promise((r) => setTimeout(r, 25))
+      }
+    }
+    expect(readFileSync(join(import.meta.dirname, '..', '..', 'CONTRACT.md'), 'utf8')).not.toMatch(
+      /pair\./,
+    )
+    process.kill(pid, 'SIGTERM')
   })
 
-  it('GRF-C214 a pairing confirmed from another connection, after 2 minutes or twice issues no token', async () => {
+  it('GRF-C233 the CLI token gets method-not-found for pair.request, and a token file that is a link or readable by others is refused and logged', async () => {
     const { paths } = runtimePlace()
-    const clock = new FakeClock(Date.UTC(2026, 9, 15, 12, 0, 0))
-    await started(paths, { clock })
-    const one = await track(cliClient(paths))
-    const two = await track(cliClient(paths))
-    const ask = () =>
-      one.call<{ id: string }>('pair.request', { client: 'ostia', rights: ['enable'] })
-    const elsewhere = await ask()
-    await expect(two.call('pair.confirm', { id: elsewhere.id })).rejects.toThrow('unknown-pairing')
-    const late = await ask()
-    await clock.advance(PAIRING_MS + 1)
-    await expect(one.call('pair.confirm', { id: late.id })).rejects.toThrow('pairing-expired')
-    const twice = await ask()
-    await one.call('pair.confirm', { id: twice.id })
-    await expect(one.call('pair.confirm', { id: twice.id })).rejects.toThrow('unknown-pairing')
-    const records = JSON.parse(readFileSync(join(paths.data, 'tokens.json'), 'utf8')) as {
-      client: string
-    }[]
-    expect(records.filter((r) => r.client === 'ostia')).toHaveLength(1)
+    const lines: string[] = []
+    const real = provisionToken(paths.data, 'real', RIGHTS)
+    const elsewhere = mkdtempSync(join(tmpdir(), 'wrt-token-'))
+    writeFileSync(
+      join(elsewhere, 'linked'),
+      JSON.stringify({ token: 'x'.repeat(43), rights: RIGHTS }),
+      {
+        mode: 0o600,
+      },
+    )
+    symlinkSync(join(elsewhere, 'linked'), join(paths.data, 'tokens', 'linked'))
+    const loose = provisionToken(paths.data, 'loose', RIGHTS)
+    chmodSync(join(paths.data, 'tokens', 'loose'), 0o644)
+    const runtime = await started(paths, { log: (line) => lines.push(line) })
+    const cli = await track(cliClient(paths))
+    await expect(cli.call('pair.request', { client: 'ostia', rights: ['enable'] })).rejects.toThrow(
+      'method-not-found',
+    )
+    await expect(
+      RuntimeClient.connect({ socket: paths.socket, token: 'x'.repeat(43) }),
+    ).rejects.toThrow('unauthorized')
+    await expect(RuntimeClient.connect({ socket: paths.socket, token: loose })).rejects.toThrow(
+      'unauthorized',
+    )
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/refused token file .*linked: it is a link/),
+        expect.stringMatching(/refused token file .*loose: others can read or write it/),
+      ]),
+    )
+    expect(
+      (await track(RuntimeClient.connect({ socket: paths.socket, token: real }))).hello.client,
+    ).toBe('real')
+    expect(runtime.tokens.revoke('real')).toBe(true)
+    expect(existsSync(join(paths.data, 'tokens', 'real'))).toBe(false)
   })
 
   it('GRF-C221 with the daemon running and Ostia closed, an agent starts a graph whose wait ends and whose agent step waits pending until Ostia connects and starts it once', async () => {

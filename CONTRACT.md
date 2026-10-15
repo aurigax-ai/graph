@@ -25,8 +25,14 @@ Clients find the runtime's pid by asking it (`runtime.status`), never from the f
 ## Tokens and rights
 
 A token is 32 random bytes. The runtime writes the CLI's token to `<data>/tokens/cli` at its first
-start, with `observe`, `start` and `ingest`; a client that needs more is paired once.
-`wire runtime tokens revoke <client>` revokes a token and closes the client's connections.
+start, with `observe`, `start` and `ingest`. There is no pairing over the socket: a host that needs
+more rights writes its own token file, `<data>/tokens/<client>` (0600, JSON
+`{ "token": "...", "rights": [...] }`, `provisionToken` in the package does it), before it starts
+the runtime or connects to it, and sends a running runtime SIGHUP. The runtime reads token files
+only from `<data>/tokens/`, at its start and on SIGHUP, and refuses and logs a file that is a link,
+another user's, readable by others, or not such an object.
+`wire runtime tokens revoke <client>` revokes a token (removing its file) and closes the client's
+connections.
 
 | Right | Allows |
 |---|---|
@@ -62,8 +68,6 @@ error has JSON-RPC code -32000.
 | `runs.control` | `control` | `{ scope, runId, action, node? }` | `{ ok }` |
 | `worker.register` | `worker` | `{ kinds, scopes }` | `{ kinds }` |
 | `events.push` | `ingest` | `{ scope, event }` | `{ matched }` |
-| `pair.request` | `observe` | `{ client, rights }` | `{ id, expiresAt }` |
-| `pair.confirm` | `observe` | `{ id }` | `{ token, client, rights }` |
 
 A scope is a real folder, `dir:<real path>`, the same for every client. `scopes.register` resolves
 the folder and refuses a scratch one (`scratch`); only a client with `worker` sets or clears its
@@ -102,12 +106,6 @@ reattached through the next worker instead of started again.
 
 `events.push` delivers an event (`{ type, ... }`, such as an agent's stop or an answer) to the
 waiting steps of one of the client's scopes; `worker-ready` is the runtime's own.
-
-## Pairing
-
-A client that needs rights beyond the CLI's asks with `pair.request` and, after its own human said
-yes, confirms on the same connection with `pair.confirm` within 2 minutes. The token is returned
-once. A pairing confirmed from another connection, late or twice issues nothing.
 
 `mode` is `client` (the runtime exits 60 s after its last client leaves while no step is running
 or waiting on a timer) or `daemon` (started with `--daemon`; it runs until `wire runtime stop`).

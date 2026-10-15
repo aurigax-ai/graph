@@ -24,6 +24,7 @@ export interface RuntimeOptions {
   idleMs?: number
   drainMs?: number
   clock?: Clock
+  log?: (line: string) => void
 }
 
 export type StartOutcome =
@@ -52,7 +53,7 @@ export class Runtime {
     private readonly opts: RuntimeOptions,
   ) {
     this.mode = opts.daemon ? 'daemon' : 'client'
-    this.tokens = new Tokens(paths.data)
+    this.tokens = new Tokens(paths.data, opts.log ?? ((line) => process.stderr.write(`${line}\n`)))
     this.tokens.ensureCliToken()
     this.stopped = new Promise((resolve) => {
       this.finish = resolve

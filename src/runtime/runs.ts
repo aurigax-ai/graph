@@ -12,7 +12,6 @@ import { type GraphFile, isRecord, triggerKind } from '../format/model.ts'
 import { descriptorOf } from '../kinds/catalog.ts'
 import { commandNode } from '../kinds/command.ts'
 import { routerNode, waitNode } from '../kinds/smallKinds.ts'
-import { Pairing } from './pairing.ts'
 import { type Listing, Registry, type Scope } from './registry.ts'
 import type { Part, Runtime } from './runtime.ts'
 import { RpcError, type Session } from './server.ts'
@@ -58,7 +57,6 @@ export class RuntimeRuns implements Part {
   readonly registry: Registry
   readonly engine: Engine
   readonly workers: WorkerPool
-  private readonly pairing: Pairing
   private readonly owned = new Map<number, Set<string>>()
   private readonly groups = new Set<number>()
 
@@ -67,7 +65,6 @@ export class RuntimeRuns implements Part {
     clock: Clock = realClock,
   ) {
     this.registry = new Registry(runtime.paths.data, () => clock.now())
-    this.pairing = new Pairing(runtime.tokens, () => clock.now())
     this.workers = new WorkerPool(this.registry, (scopes, kinds) =>
       this.workersChanged(scopes, kinds),
     )
@@ -278,14 +275,6 @@ export class RuntimeRuns implements Part {
       if (event.type === WORKER_READY) throw new RpcError('reserved-event')
       return { matched: await this.engine.deliver(event as Output, scope.key) }
     })
-    server.method('pair.request', 'observe', (raw, session) => {
-      const p = params(raw)
-      this.runtime.server.onClose(session, () => this.pairing.forget(session.id))
-      return this.pairing.request(session.id, p.client, p.rights)
-    })
-    server.method('pair.confirm', 'observe', (raw, session) =>
-      this.pairing.confirm(session.id, params(raw).id),
-    )
     server.method('runs.start', 'start', (raw, session) => this.start(params(raw), session))
     server.method('runs.control', 'control', (raw) => this.control(params(raw)))
   }

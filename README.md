@@ -52,11 +52,12 @@ In a folder, `wire list` shows the graphs the runtime holds for it, `wire start 
 enabled graph whose manual trigger says `agents: true`, `wire runs` lists the folder's runs and
 `wire show <run>` prints one node by node; each starts the runtime when none runs. A folder is
 the runtime's scope (`dir:<real path>`), whichever client registered it. The CLI never enables a
-graph: that right belongs to a client that pairs with the runtime and asks its human, and a
+graph: that right belongs to a host that provisioned its own token and asks its human, and a
 change to a graph outside `ui` disables it again.
 
-A host such as Ostia pairs with the runtime once (`pair.request`, then `pair.confirm` after its
-human said yes) and serves as a worker for the node kinds that need it: agents, approvals,
+A host such as Ostia writes its own token file with `provisionToken` before it starts or connects
+to the runtime (nothing pairs over the socket, so an agent holding the CLI's token cannot raise its
+rights) and serves as a worker for the node kinds that need it: agents, approvals,
 notices, connectors, and commands in the folders it serves. `serveKinds` from
 `@aurigax-ai/wire` answers the runtime's `worker.task` requests with ordinary node kinds. A step
 whose kind has no worker connected waits as `pending` without its timeout running, and starts
