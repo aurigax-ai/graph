@@ -14,6 +14,7 @@ import {
   validateCommand,
 } from './commands.ts'
 import { headlessHost } from './headlessHost.ts'
+import { runtimeCommand } from './runtimeCommands.ts'
 
 const USAGE = `usage: wire <command>
   validate <file>                 check a graph file
@@ -22,7 +23,10 @@ const USAGE = `usage: wire <command>
   explain <file>                  print an outline of a graph
   dry-run <file> [--input k=v]... [--input-json <json>] [--mock <node>=<json>]... [--json]
   run <file> [--input k=v]... [--data <dir>]   run a graph here until it ends
-  show <run> [--data <dir>] [--node <id>]       print a run node by node`
+  show <run> [--data <dir>] [--node <id>]       print a run node by node
+  runtime start [--daemon] [--foreground]      start the Graph Runtime (wire-runtime)
+  runtime stop | status                        stop it, or say whether and how it runs
+  runtime tokens revoke <client>               revoke a client's token`
 
 function flags(argv: string[]): {
   values: Record<string, string[]>
@@ -103,6 +107,8 @@ async function show(runId: string, data: string, node?: string): Promise<Command
 
 export async function main(argv: string[], cwd = process.cwd()): Promise<CommandOutput> {
   const [command, ...rest] = argv
+  if (command === 'runtime')
+    return (await runtimeCommand(rest)) ?? { exitCode: 2, stdout: `${USAGE}\n` }
   const parsed = flags(rest)
   const file = parsed.rest[0] ? resolve(cwd, parsed.rest[0]) : undefined
   const data = resolve(cwd, parsed.values.data?.[0] ?? '.wire/runs')

@@ -1,0 +1,11 @@
+[Unit]
+Description=Wire Graph Runtime (wire-runtime)
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /usr/lib/node_modules/@aurigax-ai/wire/dist/cli/bin.js runtime start --daemon --foreground
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
