@@ -90,7 +90,7 @@ describe('the http connector', () => {
       { url: '/v1/items?q=a', auth: `Bearer ${SECRET}`, method: 'POST', body: '{"n":1}' },
     ])
     expect(env.run(id).state.state.status).toBe(200)
-    const lines = env.store.read({ scope: 'w1', graph: 'g', runId: id })?.lines ?? []
+    const lines = (await env.store.read({ scope: 'w1', graph: 'g', runId: id }))?.lines ?? []
     expect(JSON.stringify(lines)).not.toContain(SECRET)
   })
 
@@ -227,7 +227,7 @@ describe('the http connector', () => {
       const id = env.start(graph('{ path: "/x" }'))
       await finished(env, id)
       const journal = JSON.stringify(
-        env.store.read({ scope: 'w1', graph: 'g', runId: id })?.lines ?? [],
+        (await env.store.read({ scope: 'w1', graph: 'g', runId: id }))?.lines ?? [],
       )
       runs.push({ err: String(env.run(id).state.state.err), journal })
     }
@@ -265,7 +265,7 @@ describe('the http connector', () => {
       await finished(env, id)
       expect(env.run(id).state.state.err).toBe(message)
       const journal = JSON.stringify(
-        env.store.read({ scope: 'w1', graph: 'g', runId: id })?.lines ?? [],
+        (await env.store.read({ scope: 'w1', graph: 'g', runId: id }))?.lines ?? [],
       )
       expect(journal).not.toContain(SECRET)
     }

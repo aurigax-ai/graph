@@ -17,8 +17,12 @@ function definition(text: string, name = 'g'): GraphDefinition {
   return { name, graph: loaded.value.graph, fingerprint: loaded.value.fingerprint }
 }
 
-function nodeRuns(env: ReturnType<typeof testEnv>, runId: string, node?: string): number[] {
-  return (env.store.read({ scope: 'w1', graph: 'g', runId })?.lines ?? [])
+async function nodeRuns(
+  env: ReturnType<typeof testEnv>,
+  runId: string,
+  node?: string,
+): Promise<number[]> {
+  return ((await await env.store.read({ scope: 'w1', graph: 'g', runId }))?.lines ?? [])
     .filter((l) => l.type === 'node-start' && (node === undefined || l.node === node))
     .map((l) => l.t)
 }
@@ -52,7 +56,7 @@ describe('limits, retries and triggers', () => {
     const env = testEnv()
     const id = env.start(LOOP)
     await settle()
-    expect(nodeRuns(env, id)).toHaveLength(6)
+    expect(await nodeRuns(env, id)).toHaveLength(6)
     expect(env.run(id).state.status).toBe('step-limit')
     expect(env.notices).toHaveLength(1)
   })
@@ -95,9 +99,11 @@ edges: []
     await env.clock.advance(2 * 60_000)
     expect(env.notices.map((n) => n.title)).toEqual(['too slow'])
     expect(env.run(id).state.status).toBe('done')
-    const before = env.store.read({ scope: 'w1', graph: 'g', runId: id })?.lines.length
+    const before = (await env.store.read({ scope: 'w1', graph: 'g', runId: id }))?.lines.length
     await env.stop(env.agents[0].pane)
-    expect(env.store.read({ scope: 'w1', graph: 'g', runId: id })?.lines.length).toBe(before)
+    expect((await env.store.read({ scope: 'w1', graph: 'g', runId: id }))?.lines.length).toBe(
+      before,
+    )
   })
 
   it('GRF-C169 a command retried on ExitCode runs three times 10 s and 20 s apart with two retry lines', async () => {
@@ -116,10 +122,10 @@ edges:
 `)
     await settle()
     await env.clock.advance(60_000)
-    const starts = nodeRuns(env, id, 'a')
+    const starts = await nodeRuns(env, id, 'a')
     expect(starts).toHaveLength(3)
     expect([starts[1] - starts[0], starts[2] - starts[1]]).toEqual([10_000, 20_000])
-    const lines = env.store.read({ scope: 'w1', graph: 'g', runId: id })?.lines ?? []
+    const lines = (await env.store.read({ scope: 'w1', graph: 'g', runId: id }))?.lines ?? []
     expect(lines.filter((l) => l.type === 'retry')).toHaveLength(2)
     expect(env.run(id).state.status).toBe('done')
   })
@@ -286,6 +292,6 @@ edges: []
       error: 'unsupported-kind',
       message: 'unsupported-kind: agent (host: headless)',
     })
-    expect(env.store.list()).toEqual([])
+    expect(await env.store.list()).toEqual([])
   })
 })

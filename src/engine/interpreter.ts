@@ -123,10 +123,10 @@ export class GraphRun {
     else throw err
   }
 
-  private record(body: LineBody): string | null {
+  private async record(body: LineBody): Promise<string | null> {
     const line = stampLine(body, this.state.seq + 1, this.deps.host.clock.now())
     try {
-      this.deps.store.append(this.deps.key, line)
+      await this.deps.store.append(this.deps.key, line)
     } catch (err) {
       if (err instanceof JournalError) throw err
       throw new JournalError('journal-failed', thrownMessage(err))
@@ -237,11 +237,12 @@ export class GraphRun {
     return this.state.active.size
   }
 
-  open(start: Extract<LineBody, { type: 'run-start' }>): Promise<void> {
-    return this.serial(() => {
-      this.record(start)
+  open(definition: unknown, start: Extract<LineBody, { type: 'run-start' }>): Promise<void> {
+    return this.serial(async () => {
+      await this.deps.store.create(this.deps.key, definition)
+      await this.record(start)
       this.armTimeLimit()
-      this.pump()
+      await this.pump()
     })
   }
 
@@ -253,20 +254,28 @@ export class GraphRun {
     )
   }
 
-  private pump(): void {
+  private async pump(): Promise<void> {
     if (isEnded(this.state.status)) return
+    const launches: (() => void)[] = []
     while (!this.state.paused && !this.state.failure && this.state.ready.length > 0) {
       if (this.running() >= this.deps.limits.parallel) break
       const id = this.state.ready[0] as string
-      if (!this.startNode(id, { attempt: 1, visit: (this.state.visits[id] ?? 0) + 1 })) return
+      const started = await this.startNode(
+        id,
+        { attempt: 1, visit: (this.state.visits[id] ?? 0) + 1 },
+        undefined,
+        launches,
+      )
+      if (!started) return
     }
-    this.maybeFinish()
+    for (const launch of launches.splice(0)) launch()
+    await this.maybeFinish()
   }
 
-  private maybeFinish(): void {
+  private async maybeFinish(): Promise<void> {
     if (isEnded(this.state.status) || this.state.active.size > 0) return
-    if (this.state.failure) this.end('failed', this.state.failure)
-    else if (this.state.ready.length === 0) this.end('done')
+    if (this.state.failure) await this.end('failed', this.state.failure)
+    else if (this.state.ready.length === 0) await this.end('done')
   }
 
   private renderInput(id: string, override?: Output): Output | NodeError {
@@ -299,23 +308,24 @@ export class GraphRun {
     return input
   }
 
-  private startNode(
+  private async startNode(
     id: string,
     at: { attempt: number; visit: number },
     override?: Output,
-  ): boolean {
+    launches?: (() => void)[],
+  ): Promise<boolean> {
     if (this.state.steps >= this.deps.limits.steps) {
-      this.end('step-limit')
+      await this.end('step-limit')
       return false
     }
     const bound = this.kind(id)
     const input = this.renderInput(id, override)
     const opens = !(input instanceof NodeError) && bound.descriptor.opensAgent?.(input) === true
     if (opens && this.state.agents >= this.deps.limits.agents) {
-      this.end('agent-limit')
+      await this.end('agent-limit')
       return false
     }
-    this.record({
+    await this.record({
       type: 'node-start',
       node: id,
       visit: at.visit,
@@ -329,8 +339,14 @@ export class GraphRun {
       void this.serial(() => this.nodeError(id, live.gen, input))
       return true
     }
-    this.armTimeout(id, active)
-    this.call(id, live, () => bound.impl.start(input, this.context(id, active, live.abort.signal)))
+    const launch = () => {
+      this.armTimeout(id, active)
+      this.call(id, live, () =>
+        bound.impl.start(input, this.context(id, active, live.abort.signal)),
+      )
+    }
+    if (launches) launches.push(launch)
+    else launch()
     return true
   }
 
@@ -355,7 +371,7 @@ export class GraphRun {
 
   private async onResult(id: string, gen: number, res: NodeResult): Promise<void> {
     if ('done' in res) return this.finish(id, gen, res.done, 'done')
-    this.record({
+    await this.record({
       type: 'node-wait',
       node: id,
       wait: res.waiting,
@@ -416,12 +432,12 @@ export class GraphRun {
     }
     if (!this.current(id, gen)) return
     if (stateTooLarge(applyWrites(this.state.state, writes))) {
-      this.end('state-too-large')
+      await this.end('state-too-large')
       return
     }
     const active = this.state.active.get(id) as ActiveNode
     this.dropLive(id, false)
-    this.record({
+    await this.record({
       type: 'node-end',
       node: id,
       status,
@@ -429,25 +445,25 @@ export class GraphRun {
       writes,
       ms: this.deps.host.clock.now() - active.startedAt,
     })
-    this.stateLine()
-    if (!this.state.failure && !isEnded(this.state.status)) this.route(id)
-    this.pump()
+    await this.stateLine()
+    if (!this.state.failure && !isEnded(this.state.status)) await this.route(id)
+    await this.pump()
   }
 
-  private stateLine(): void {
+  private async stateLine(): Promise<void> {
     if (this.state.endsSinceState >= STATE_LINE_EVERY)
-      this.record({ type: 'state', state: this.state.state })
+      await this.record({ type: 'state', state: this.state.state })
   }
 
-  private route(id: string): void {
+  private async route(id: string): Promise<void> {
     for (const edge of this.state.graph.edges) {
       if (isJoin(edge) && edge.from.includes(id))
-        this.record({ type: 'edge', from: id, to: edge.to, outcome: 'taken' })
+        await this.record({ type: 'edge', from: id, to: edge.to, outcome: 'taken' })
     }
     const edge = this.state.graph.edges.find((e) => !Array.isArray(e.from) && e.from === id)
     if (!edge) return
     if (!isConditional(edge)) {
-      for (const to of Array.isArray(edge.to) ? edge.to : [edge.to]) this.take(id, to)
+      for (const to of Array.isArray(edge.to) ? edge.to : [edge.to]) await this.take(id, to)
       return
     }
     const scope = this.scope()
@@ -460,7 +476,7 @@ export class GraphRun {
         ? evaluateCondition(parsed.expr, scope)
         : { ok: false as const, error: parsed.problem.message }
       if (!value.ok) {
-        this.conditionError(id, `"${branch.if}": ${value.error}`)
+        await this.conditionError(id, `"${branch.if}": ${value.error}`)
         return
       }
       if (value.value) {
@@ -470,15 +486,15 @@ export class GraphRun {
       }
       if (!falses.has(branch.to)) falses.set(branch.to, branch.if)
     }
-    this.take(id, chosen, chosenIf)
+    await this.take(id, chosen, chosenIf)
     const others = new Set([...edge.when.map((w) => w.to), edge.else])
     others.delete(chosen)
-    for (const to of others) this.skip(id, to, new Set(), falses.get(to))
+    for (const to of others) await this.skip(id, to, new Set(), falses.get(to))
   }
 
-  private take(from: string, to: string, when?: string): void {
+  private async take(from: string, to: string, when?: string): Promise<void> {
     if (to === END) return
-    this.record({
+    await this.record({
       type: 'edge',
       from,
       to,
@@ -487,10 +503,10 @@ export class GraphRun {
     })
   }
 
-  private skip(from: string, to: string, seen: Set<string>, when?: string): void {
+  private async skip(from: string, to: string, seen: Set<string>, when?: string): Promise<void> {
     if (to === END || seen.has(`${from}>${to}`)) return
     seen.add(`${from}>${to}`)
-    const completedSkipped = this.record({
+    const completedSkipped = await this.record({
       type: 'edge',
       from,
       to,
@@ -501,7 +517,7 @@ export class GraphRun {
     if (this.state.active.has(target) || this.state.ready.includes(target)) return
     if (!completedSkipped && this.isJoinTarget(to)) return
     for (const edge of this.state.graph.edges) {
-      if (isJoin(edge) && edge.from.includes(target)) this.skip(target, edge.to, seen)
+      if (isJoin(edge) && edge.from.includes(target)) await this.skip(target, edge.to, seen)
       else if (!Array.isArray(edge.from) && edge.from === target) {
         const targets = isConditional(edge)
           ? [...edge.when.map((w) => w.to), edge.else]
@@ -509,7 +525,7 @@ export class GraphRun {
             ? edge.to
             : [edge.to]
         for (const next of new Set(targets))
-          if (this.reachesJoin(next)) this.skip(target, next, seen)
+          if (this.reachesJoin(next)) await this.skip(target, next, seen)
       }
     }
   }
@@ -541,14 +557,14 @@ export class GraphRun {
     return false
   }
 
-  private conditionError(id: string, message: string): void {
+  private async conditionError(id: string, message: string): Promise<void> {
     const rule = catchRule(this.node(id), 'ConditionError')
     if (rule && rule.then !== CONTINUE) {
-      this.take(id, rule.then)
+      await this.take(id, rule.then)
       return
     }
     if (rule) return
-    this.failRun({ node: id, name: 'ConditionError', message })
+    await this.failRun({ node: id, name: 'ConditionError', message })
   }
 
   private async nodeError(id: string, gen: number, err: unknown): Promise<void> {
@@ -572,7 +588,7 @@ export class GraphRun {
       const used = this.state.retries.get(key) ?? 0
       if (used < (retry.rule.maxAttempts ?? 1)) {
         const delayMs = retryDelay(retry.rule, used, this.deps.host.random ?? Math.random)
-        this.record({
+        await this.record({
           type: 'retry',
           node: id,
           attempt: active.attempt,
@@ -581,9 +597,9 @@ export class GraphRun {
           rule: retry.index,
         })
         const next = this.liveOf(id)
-        this.timer(id, next.gen, this.deps.host.clock.now() + delayMs, () => {
-          this.startNode(id, { attempt: active.attempt + 1, visit: active.visit })
-          this.pump()
+        this.timer(id, next.gen, this.deps.host.clock.now() + delayMs, async () => {
+          await this.startNode(id, { attempt: active.attempt + 1, visit: active.visit })
+          await this.pump()
         })
         return
       }
@@ -597,7 +613,7 @@ export class GraphRun {
         error: { name, message },
       })
       this.dropLive(id, false)
-      this.record({
+      await this.record({
         type: 'node-end',
         node: id,
         status: 'caught',
@@ -605,34 +621,34 @@ export class GraphRun {
         writes,
         ms: this.deps.host.clock.now() - active.startedAt,
       })
-      this.take(id, rule.then)
-      this.pump()
+      await this.take(id, rule.then)
+      await this.pump()
       return
     }
-    this.record({
+    await this.record({
       type: 'node-end',
       node: id,
       status: 'failed',
       error: { name, message },
       ms: this.deps.host.clock.now() - active.startedAt,
     })
-    this.failRun({ node: id, name, message })
+    await this.failRun({ node: id, name, message })
   }
 
-  private failRun(failure: { node: string; name: string; message: string }): void {
+  private async failRun(failure: { node: string; name: string; message: string }): Promise<void> {
     if (!this.state.failure) this.state.failure = failure
     for (const [other, active] of [...this.state.active]) {
       if (active.phase === 'running' || (active.phase === 'waiting' && active.wait?.on === 'event'))
         continue
       this.releaseWait(other, active)
-      this.record({
+      await this.record({
         type: 'node-end',
         node: other,
         status: 'cancelled',
         ms: this.deps.host.clock.now() - active.startedAt,
       })
     }
-    this.maybeFinish()
+    await this.maybeFinish()
   }
 
   private releaseWait(id: string, active: ActiveNode): void {
@@ -649,12 +665,15 @@ export class GraphRun {
     }
   }
 
-  private end(status: RunStatus, error?: { node: string; name: string; message: string }): void {
+  private async end(
+    status: RunStatus,
+    error?: { node: string; name: string; message: string },
+  ): Promise<void> {
     if (isEnded(this.state.status)) return
     for (const cancel of this.runTimers.splice(0)) cancel()
     for (const [id, active] of [...this.state.active]) this.releaseWait(id, active)
-    this.record({ type: 'state', state: this.state.state })
-    this.record({ type: 'run-end', status, ...(error ? { error } : {}) })
+    await this.record({ type: 'state', state: this.state.state })
+    await this.record({ type: 'run-end', status, ...(error ? { error } : {}) })
     this.deps.ended(status)
   }
 
@@ -668,22 +687,23 @@ export class GraphRun {
   }
 
   recordReport(node: string, valid: boolean): Promise<void> {
-    return this.serial(() => {
-      if (this.state.active.has(node)) this.record({ type: 'node-report', node, valid })
+    return this.serial(async () => {
+      if (this.state.active.has(node)) await this.record({ type: 'node-report', node, valid })
     })
   }
 
   pause(): Promise<void> {
-    return this.serial(() => {
-      if (!isEnded(this.state.status) && !this.state.paused) this.record({ type: 'run-pause' })
+    return this.serial(async () => {
+      if (!isEnded(this.state.status) && !this.state.paused)
+        await this.record({ type: 'run-pause' })
     })
   }
 
   resume(): Promise<void> {
-    return this.serial(() => {
+    return this.serial(async () => {
       if (!this.state.paused) return
-      this.record({ type: 'run-resume', choice: 'resume' })
-      this.pump()
+      await this.record({ type: 'run-resume', choice: 'resume' })
+      await this.pump()
     })
   }
 
@@ -693,34 +713,41 @@ export class GraphRun {
 
   retry(): Promise<boolean> {
     let retried = false
-    return this.serial(() => {
+    return this.serial(async () => {
       const failure = this.state.failure
       if (this.state.status !== 'failed' || !failure) return
       const node = failure.node
-      this.record({ type: 'run-resume', choice: 'retry', node })
+      await this.record({ type: 'run-resume', choice: 'retry', node })
       this.armTimeLimit()
-      retried = this.startNode(node, {
+      retried = await this.startNode(node, {
         attempt: 1,
         visit: Math.max(1, this.state.visits[node] ?? 1),
       })
-      this.pump()
+      await this.pump()
     }).then(() => retried)
   }
 
   resolve(node: string, choice: 'rerun' | 'skip' | 'continue'): Promise<boolean> {
     let done = false
-    return this.serial(() => {
+    return this.serial(async () => {
       const active = this.state.active.get(node)
       if (active?.phase !== 'interrupted') return
       done = true
       if (choice === 'skip') {
-        this.record({ type: 'run-resume', choice, node })
-        this.record({ type: 'node-end', node, status: 'skipped', output: {}, writes: [], ms: 0 })
-        this.route(node)
-        this.pump()
+        await this.record({ type: 'run-resume', choice, node })
+        await this.record({
+          type: 'node-end',
+          node,
+          status: 'skipped',
+          output: {},
+          writes: [],
+          ms: 0,
+        })
+        await this.route(node)
+        await this.pump()
         return
       }
-      this.record({ type: 'run-resume', choice, node })
+      await this.record({ type: 'run-resume', choice, node })
       const override =
         choice === 'continue'
           ? {
@@ -730,8 +757,8 @@ export class GraphRun {
               ...(active.input.wait ? { wait: active.input.wait } : {}),
             }
           : undefined
-      this.startNode(node, { attempt: active.attempt + 1, visit: active.visit }, override)
-      this.pump()
+      await this.startNode(node, { attempt: active.attempt + 1, visit: active.visit }, override)
+      await this.pump()
     }).then(() => done)
   }
 
@@ -740,7 +767,7 @@ export class GraphRun {
       if (isEnded(this.state.status)) return
       this.armTimeLimit()
       for (const [id, active] of [...this.state.active]) await this.recoverNode(id, active)
-      this.pump()
+      await this.pump()
     })
   }
 
@@ -749,9 +776,9 @@ export class GraphRun {
     const live = this.freshLive(id)
     if (active.phase === 'interrupted') return
     if (active.phase === 'retrying') {
-      this.timer(id, live.gen, active.retryAt ?? this.deps.host.clock.now(), () => {
-        this.startNode(id, { attempt: active.attempt + 1, visit: active.visit })
-        this.pump()
+      this.timer(id, live.gen, active.retryAt ?? this.deps.host.clock.now(), async () => {
+        await this.startNode(id, { attempt: active.attempt + 1, visit: active.visit })
+        await this.pump()
       })
       return
     }
@@ -762,7 +789,7 @@ export class GraphRun {
         .reattach(active.started, active.wait, ctx)
         .catch(() => 'lost' as const)
     else verdict = active.phase === 'waiting' ? 'running' : 'lost'
-    this.record({
+    await this.record({
       type: 'reattach',
       node: id,
       verdict: typeof verdict === 'string' ? verdict : 'done',
@@ -778,9 +805,9 @@ export class GraphRun {
     if (verdict !== 'lost') return this.finish(id, live.gen, verdict.done, 'done')
     const once = this.node(id).once ?? bound.descriptor.once
     if (once) {
-      this.record({ type: 'run-interrupted', node: id })
+      await this.record({ type: 'run-interrupted', node: id })
       return
     }
-    this.startNode(id, { attempt: active.attempt + 1, visit: active.visit })
+    await this.startNode(id, { attempt: active.attempt + 1, visit: active.visit })
   }
 }

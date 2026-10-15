@@ -1,4 +1,5 @@
 export { type ContractProbe, contractFailures } from './engine/contractSuite.ts'
+export { journalStoreFailures } from './engine/storeSuite.ts'
 export {
   FakeClock,
   fakeAgentKind,

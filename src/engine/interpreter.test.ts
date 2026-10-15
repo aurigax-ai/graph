@@ -10,13 +10,13 @@ state:
 ${state}
 `
 
-function ends(env: ReturnType<typeof testEnv>, runId: string): string[] {
-  const stored = env.store.read({ scope: 'w1', graph: 'g', runId })
+async function ends(env: ReturnType<typeof testEnv>, runId: string): Promise<string[]> {
+  const stored = await await env.store.read({ scope: 'w1', graph: 'g', runId })
   return (stored?.lines ?? []).flatMap((l) => (l.type === 'node-end' ? [l.node] : []))
 }
 
-function lines(env: ReturnType<typeof testEnv>, runId: string) {
-  return env.store.read({ scope: 'w1', graph: 'g', runId })?.lines ?? []
+async function lines(env: ReturnType<typeof testEnv>, runId: string) {
+  return (await await env.store.read({ scope: 'w1', graph: 'g', runId }))?.lines ?? []
 }
 
 const reply = (stdout: string, exitCode = 0) => ({
@@ -94,7 +94,7 @@ edges: []
     await env.stop(b.pane, { message: 'from b' })
     await env.stop(a.pane, { message: 'from a' })
     expect(env.run(id).state.state.notes).toEqual(['from b', 'from a'])
-    expect(ends(env, id)).toEqual(['b', 'a'])
+    expect(await ends(env, id)).toEqual(['b', 'a'])
   })
 
   it('GRF-C21 and GRF-C40 a node reads the state from when it started; the join sees both writes', async () => {
@@ -221,12 +221,12 @@ edges:
     const failed = plain.start(graph(''))
     await settle()
     expect(plain.run(failed).state.failure).toMatchObject({ node: 'test', name: 'ConditionError' })
-    expect(ends(plain, failed)).toEqual(['test'])
+    expect(await ends(plain, failed)).toEqual(['test'])
     const caught = testEnv()
     const handled = caught.start(graph(', catch: [{ errors: [ConditionError], then: handler }]'))
     await settle()
     expect(caught.run(handled).state.status).toBe('done')
-    expect(ends(caught, handled)).toEqual(['test', 'handler'])
+    expect(await ends(caught, handled)).toEqual(['test', 'handler'])
     const missing = testEnv()
     const m = missing.start(graph('').replace("state.count > 'abc'", 'state.missing == 1'))
     await settle()
@@ -269,7 +269,7 @@ edges:
     else: implement
 `)
       await settle()
-      expect(ends(env, id)).toEqual(['test', next])
+      expect(await ends(env, id)).toEqual(['test', next])
     }
   })
 
@@ -293,9 +293,11 @@ edges:
     env.commandReply = () => reply('from a')
     const id = env.start(graph(0))
     await settle()
-    expect(ends(env, id)).toEqual(['f', 'pick', 'a', 'c'])
+    expect(await ends(env, id)).toEqual(['f', 'pick', 'a', 'c'])
     expect(
-      lines(env, id).some((l) => l.type === 'edge' && l.to === 'b' && l.outcome === 'skipped'),
+      (await lines(env, id)).some(
+        (l) => l.type === 'edge' && l.to === 'b' && l.outcome === 'skipped',
+      ),
     ).toBe(true)
     expect(env.run(id).state.state.out).toBe('from a')
 
@@ -318,9 +320,10 @@ edges:
   - { from: [a, b], to: c }
 `)
     await settle()
-    expect(ends(both, twice)).toEqual(['f', 'p1', 'p2'])
+    expect(await ends(both, twice)).toEqual(['f', 'p1', 'p2'])
     expect(both.run(twice).state.status).toBe('done')
   })
+
 
   it('GRF-C43 an uncaught error in one branch fails the run, starts nothing new and keeps the running node’s output', async () => {
     const env = testEnv()
@@ -339,7 +342,7 @@ edges:
     await env.stop(env.agents[0].pane, { message: 'finished' })
     const run = env.run(id).state
     expect(run.status).toBe('failed')
-    expect(ends(env, id)).toEqual(['boom', 'slow'])
+    expect(await ends(env, id)).toEqual(['boom', 'slow'])
     expect(run.state.o).toBe('finished')
   })
 
@@ -464,7 +467,7 @@ edges:
     const run = caught.run(ok).state
     expect(run.status).toBe('done')
     expect(run.state.err).toMatchObject({ name: 'Dismissed' })
-    expect(ends(caught, ok)).toEqual(['a', 'b'])
+    expect(await ends(caught, ok)).toEqual(['a', 'b'])
   })
 
   it('GRF-C63 a wait until a past time ends at once', async () => {

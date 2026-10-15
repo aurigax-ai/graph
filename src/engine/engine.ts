@@ -202,21 +202,13 @@ export class Engine {
     const runId = runIdAt(now)
     const key: RunKey = { scope, graph: definition.name, runId }
     const state = newRunState(runId, definition.name, definition.graph)
-    try {
-      this.opts.store.create(key, {
-        name: definition.name,
-        fingerprint: definition.fingerprint,
-        graph: definition.graph,
-      })
-    } catch (err) {
-      return {
-        ok: false,
-        error: 'journal-failed',
-        message: err instanceof Error ? err.message : String(err),
-      }
-    }
     const run = this.bind(key, state, limits)
-    void run.open({
+    const stored = {
+      name: definition.name,
+      fingerprint: definition.fingerprint,
+      graph: definition.graph,
+    }
+    void run.open(stored, {
       type: 'run-start',
       graph: definition.name,
       fingerprint: definition.fingerprint,
@@ -261,12 +253,14 @@ export class Engine {
     if (queued) this.start(key.scope, queued.definition, queued.trigger, queued.input)
   }
 
-  recover(scope?: string): { resumed: string[]; refused: { runId: string; error: string }[] } {
+  async recover(
+    scope?: string,
+  ): Promise<{ resumed: string[]; refused: { runId: string; error: string }[] }> {
     const resumed: string[] = []
     const refused: { runId: string; error: string }[] = []
-    for (const key of this.opts.store.list(scope)) {
+    for (const key of await this.opts.store.list(scope)) {
       if (this.runs.has(key.runId)) continue
-      const stored = this.opts.store.read(key)
+      const stored = await this.opts.store.read(key)
       if (!stored) continue
       const definition = stored.definition as { graph?: GraphFile }
       if (!definition?.graph) continue
@@ -297,20 +291,22 @@ export class Engine {
     return this.active().flatMap((run) => run.waitingOn(event).map((node) => ({ run, node })))
   }
 
-  summaries(scope?: string): RunSummary[] {
-    return this.opts.store
-      .list(scope)
-      .map((key) => {
-        const live = this.runs.get(key.runId)
-        if (live) return summarize(key, live.state)
-        const stored = this.opts.store.read(key)
-        const graph = (stored?.definition as { graph?: GraphFile } | undefined)?.graph
-        if (!stored || !graph) return null
-        if (stored.lines.some((line) => line.v !== JOURNAL_VERSION))
-          return summarize(key, null, 'journal-version')
-        return summarize(key, replay(key.runId, key.graph, graph, stored.lines))
-      })
-      .filter((s): s is RunSummary => s !== null)
+  async summaries(scope?: string): Promise<RunSummary[]> {
+    const summaries: RunSummary[] = []
+    for (const key of await this.opts.store.list(scope)) {
+      const live = this.runs.get(key.runId)
+      if (live) {
+        summaries.push(summarize(key, live.state))
+        continue
+      }
+      const stored = await this.opts.store.read(key)
+      const graph = (stored?.definition as { graph?: GraphFile } | undefined)?.graph
+      if (!stored || !graph) continue
+      if (stored.lines.some((line) => line.v !== JOURNAL_VERSION))
+        summaries.push(summarize(key, null, 'journal-version'))
+      else summaries.push(summarize(key, replay(key.runId, key.graph, graph, stored.lines)))
+    }
+    return summaries
   }
 
   stopAll(): void {

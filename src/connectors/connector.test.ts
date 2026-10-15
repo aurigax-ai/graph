@@ -143,7 +143,7 @@ edges: [{ from: a, to: b }, { from: b, to: c }]
     await settle()
     expect(env.run(id).state.state.err).toBe('leaky.request failed')
     expect(
-      JSON.stringify(env.store.read({ scope: 'w1', graph: 'g', runId: id })?.lines ?? []),
+      JSON.stringify((await env.store.read({ scope: 'w1', graph: 'g', runId: id }))?.lines ?? []),
     ).not.toContain(SECRET)
   })
 })

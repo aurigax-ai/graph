@@ -52,7 +52,7 @@ describe('journal and recovery', () => {
     await settle()
     await clock.advance(4 * 60_000)
     const later = testEnv({ store: files, clock: new FakeClock(clock.now()) })
-    expect(later.engine.recover('w1').resumed).toEqual([id])
+    expect((await later.engine.recover('w1')).resumed).toEqual([id])
     await settle()
     await later.clock.advance(6 * 60_000 - 1)
     expect(later.notices).toEqual([])
@@ -109,7 +109,7 @@ edges:
     env.reattach.set(env.agents[0].pane, 'running')
     const later = testEnv({ store: files, clock: new FakeClock(env.clock.now()) })
     later.reattach.set(env.agents[0].pane, 'running')
-    expect(later.engine.recover('w1').resumed).toEqual([id])
+    expect((await later.engine.recover('w1')).resumed).toEqual([id])
     await settle()
     const run = later.engine.run(id)
     expect(run?.state.state.log).toBe('written')
@@ -145,7 +145,7 @@ edges: []
       await settle()
       await clock.advance(3_600_000)
     }
-    const kept = files.list('w1').map((k) => k.runId)
+    const kept = (await files.list('w1')).map((k) => k.runId)
     expect(kept).toContain(active)
     expect(kept).not.toContain(ids[0])
     expect(kept.filter((k) => k !== active)).toHaveLength(RUNS_KEPT)
@@ -153,7 +153,7 @@ edges: []
     await clock.advance(31 * DAY)
     env.engine.start('w1', def, {}, {})
     await settle()
-    const after = files.list('w1').map((k) => k.runId)
+    const after = (await files.list('w1')).map((k) => k.runId)
     expect(after).toContain(active)
     expect(after.filter((k) => k !== active)).toHaveLength(1)
   })
@@ -164,7 +164,7 @@ edges: []
     const id = env.start(AGENT)
     await settle()
     const later = testEnv({ store: files, clock: new FakeClock(env.clock.now()) })
-    later.engine.recover('w1')
+    await later.engine.recover('w1')
     await settle()
     const run = later.engine.run(id)
     expect(run?.state.status).toBe('interrupted')
@@ -183,7 +183,7 @@ edges: []
     const second = skip.start(AGENT.replace('title: next', 'title: skipped on'))
     await settle()
     const third = testEnv({ store: files, clock: new FakeClock(skip.clock.now()) })
-    third.engine.recover('w1')
+    await third.engine.recover('w1')
     await settle()
     await third.engine.run(second)?.resolve('a', 'skip')
     await settle()
@@ -212,11 +212,11 @@ edges: []
     const path = join(root, 'w1', 'g', id, JOURNAL_FILE)
     writeFileSync(path, readFileSync(path, 'utf8').replaceAll('"v":1', '"v":2'))
     const later = testEnv({ store: files })
-    expect(later.engine.recover('w1')).toEqual({
+    expect(await later.engine.recover('w1')).toEqual({
       resumed: [],
       refused: [{ runId: id, error: 'journal-version' }],
     })
-    expect(later.engine.summaries('w1').map((s) => s.status)).toEqual(['journal-version'])
+    expect((await later.engine.summaries('w1')).map((s) => s.status)).toEqual(['journal-version'])
     expect(later.agents).toEqual([])
     expect(() => new Engine({ host: { ...env.host, contract: 2 }, store: files })).toThrow(
       'unsupported-contract',

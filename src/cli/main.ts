@@ -89,10 +89,10 @@ async function runHere(
   }
 }
 
-function show(runId: string, data: string, node?: string): CommandOutput {
+async function show(runId: string, data: string, node?: string): Promise<CommandOutput> {
   const store = new FileJournalStore(data)
-  const key = store.list().find((k) => k.runId === runId)
-  const stored = key ? store.read(key) : null
+  const key = (await store.list()).find((k) => k.runId === runId)
+  const stored = key ? await store.read(key) : null
   const graph = (stored?.definition as { graph?: Parameters<typeof runView>[1] } | undefined)?.graph
   if (!key || !stored || !graph)
     return { exitCode: 1, stdout: `${JSON.stringify({ ok: false, error: 'unknown-run' })}\n` }

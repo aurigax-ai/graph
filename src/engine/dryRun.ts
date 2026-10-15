@@ -128,14 +128,15 @@ export async function dryRun(
     if (!clock.fireNext(Number.POSITIVE_INFINITY)) break
   }
   const key = { scope: 'dry-run', graph: loaded.name, runId: started.runId }
-  const view = runView(key, loaded.graph, store.read(key)?.lines ?? [])
+  const lines = (await store.read(key))?.lines ?? []
+  const view = runView(key, loaded.graph, lines)
   const queue = new Map<string, typeof view.nodes>()
   for (const n of view.nodes) {
     if (n.endedAt === undefined) continue
     queue.set(n.node, [...(queue.get(n.node) ?? []), n])
   }
   const steps: DryStep[] = []
-  for (const line of store.read(key)?.lines ?? []) {
+  for (const line of lines) {
     if (line.type === 'node-end') {
       const n = queue.get(line.node)?.shift()
       if (!n) continue

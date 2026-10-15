@@ -109,6 +109,12 @@ and `resume` completes it when the event arrives, also after a restart. `@auriga
 has a fake clock, fake agent and approval kinds, and `contractFailures`, the suite a host's kinds
 must pass.
 
+Runs are kept by a `JournalStore`, whose every method returns a promise: `FileJournalStore` (one
+folder per run, each line written and synced before the run goes on) and `MemoryJournalStore`
+(tests). A run's line is in the store before the step it records starts. Another store passes
+`journalStoreFailures` from `@aurigax-ai/wire/testing` when it returns no failures. `engine.recover`
+and `engine.summaries` return promises too.
+
 ## License
 
 [FSL-1.1-MIT](LICENSE): source available now, MIT two years after each release.
