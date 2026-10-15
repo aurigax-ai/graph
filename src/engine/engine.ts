@@ -176,7 +176,12 @@ export class Engine {
     return { ok: false, error: 'skipped', message: reason }
   }
 
-  start(scope: string, definition: GraphDefinition, trigger: Output, input: Output): StartResult {
+  async start(
+    scope: string,
+    definition: GraphDefinition,
+    trigger: Output,
+    input: Output,
+  ): Promise<StartResult> {
     const missing = missingKinds(definition.graph, this.opts.host)
     if (missing.length > 0)
       return { ok: false, error: missing[0].code, message: missing[0].message }
@@ -203,12 +208,22 @@ export class Engine {
     const key: RunKey = { scope, graph: definition.name, runId }
     const state = newRunState(runId, definition.name, definition.graph)
     const run = this.bind(key, state, limits)
-    const stored = {
-      name: definition.name,
-      fingerprint: definition.fingerprint,
-      graph: definition.graph,
+    try {
+      await this.opts.store.create(key, {
+        name: definition.name,
+        fingerprint: definition.fingerprint,
+        graph: definition.graph,
+      })
+    } catch (err) {
+      this.runs.delete(runId)
+      record.starts.pop()
+      return {
+        ok: false,
+        error: 'journal-failed',
+        message: err instanceof Error ? err.message : String(err),
+      }
     }
-    void run.open(stored, {
+    void run.open({
       type: 'run-start',
       graph: definition.name,
       fingerprint: definition.fingerprint,
@@ -250,7 +265,7 @@ export class Engine {
     const record = this.record(key.scope, key.graph)
     const queued = record.queued
     record.queued = null
-    if (queued) this.start(key.scope, queued.definition, queued.trigger, queued.input)
+    if (queued) void this.start(key.scope, queued.definition, queued.trigger, queued.input)
   }
 
   async recover(

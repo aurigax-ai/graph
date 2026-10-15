@@ -48,7 +48,7 @@ describe('journal and recovery', () => {
     const { files } = store()
     const clock = new FakeClock(Date.UTC(2026, 9, 14, 12, 0, 0))
     const first = testEnv({ store: files, clock })
-    const id = first.start(WAIT)
+    const id = await first.start(WAIT)
     await settle()
     await clock.advance(4 * 60_000)
     const later = testEnv({ store: files, clock: new FakeClock(clock.now()) })
@@ -64,7 +64,7 @@ describe('journal and recovery', () => {
   it('GRF-C67 a finished run’s files are 0600 in a 0700 folder and its lines are whole and ordered', async () => {
     const { root, files } = store()
     const env = testEnv({ store: files })
-    const id = env.start(AGENT)
+    const id = await env.start(AGENT)
     await settle()
     await env.stop(env.agents[0].pane)
     const dir = join(root, 'w1', 'g', id)
@@ -86,7 +86,7 @@ describe('journal and recovery', () => {
   it('GRF-C68 a torn last line is dropped and the state comes from the last state line and the writes after it', async () => {
     const { root, files } = store()
     const env = testEnv({ store: files })
-    const id = env.start(`version: 1
+    const id = await env.start(`version: 1
 on: [{ manual: {} }]
 start: a
 state: { log: { type: string, default: "" } }
@@ -116,6 +116,27 @@ edges:
     expect(run?.state.active.get('b')?.phase).toBe('waiting')
   })
 
+  it('GRF-C68 after a torn last line the recovered run goes on and every later line is kept', async () => {
+    const { root, files } = store()
+    const env = testEnv({ store: files })
+    const id = await env.start(AGENT)
+    await settle()
+    const path = join(root, 'w1', 'g', id, JOURNAL_FILE)
+    writeFileSync(path, `${readFileSync(path, 'utf8')}{"v":1,"seq":99,"type":"node-e`)
+    const later = testEnv({
+      store: new FileJournalStore(root),
+      clock: new FakeClock(env.clock.now()),
+    })
+    later.reattach.set(env.agents[0].pane, 'running')
+    expect((await later.engine.recover('w1')).resumed).toEqual([id])
+    await settle()
+    await later.stop(env.agents[0].pane)
+    expect(later.engine.run(id)?.state.status).toBe('done')
+    const reread = testEnv({ store: new FileJournalStore(root) })
+    expect((await reread.engine.summaries('w1')).map((s) => s.status)).toEqual(['done'])
+    expect(linesOf(root, id).map((l) => l.seq)).toEqual(linesOf(root, id).map((_, i) => i + 1))
+  })
+
   it('GRF-C69 a run end keeps the newest 50 runs, nothing older than 30 days, and never an active run', async () => {
     const clock = new FakeClock(Date.UTC(2026, 9, 14, 12, 0, 0))
     const files = new FileJournalStore(mkdtempSync(join(tmpdir(), 'graph-runs-')), () =>
@@ -136,11 +157,11 @@ edges: []
     const ids: string[] = []
     env.engine.ceilings.runsPerHour = 60
     const elsewhere = testEnv({ store: files, clock: new FakeClock(clock.now()) })
-    const active = elsewhere.start(AGENT)
+    const active = await elsewhere.start(AGENT)
     await settle()
     for (let i = 0; i < RUNS_KEPT + 1; i++) {
       await clock.advance(i === 0 ? 0 : (2 * DAY) / RUNS_KEPT)
-      const res = env.engine.start('w1', def, {}, {})
+      const res = await env.engine.start('w1', def, {}, {})
       if (res.ok && 'runId' in res) ids.push(res.runId)
       await settle()
       await clock.advance(3_600_000)
@@ -151,7 +172,7 @@ edges: []
     expect(kept.filter((k) => k !== active)).toHaveLength(RUNS_KEPT)
 
     await clock.advance(31 * DAY)
-    env.engine.start('w1', def, {}, {})
+    await env.engine.start('w1', def, {}, {})
     await settle()
     const after = (await files.list('w1')).map((k) => k.runId)
     expect(after).toContain(active)
@@ -161,7 +182,7 @@ edges: []
   it('GRF-C72 and GRF-C73 a lost once node makes the run interrupted until the human picks Run again, Continue or Skip', async () => {
     const { files } = store()
     const env = testEnv({ store: files })
-    const id = env.start(AGENT)
+    const id = await env.start(AGENT)
     await settle()
     const later = testEnv({ store: files, clock: new FakeClock(env.clock.now()) })
     await later.engine.recover('w1')
@@ -180,7 +201,7 @@ edges: []
     expect(later.notices.map((n) => n.title)).toEqual(['next'])
 
     const skip = testEnv({ store: files })
-    const second = skip.start(AGENT.replace('title: next', 'title: skipped on'))
+    const second = await skip.start(AGENT.replace('title: next', 'title: skipped on'))
     await settle()
     const third = testEnv({ store: files, clock: new FakeClock(skip.clock.now()) })
     await third.engine.recover('w1')
@@ -194,7 +215,7 @@ edges: []
   it('GRF-C177 a journal that cannot be written ends the run journal-failed before the next node, with one notification', async () => {
     const { root, files } = store()
     const env = testEnv({ store: files })
-    const id = env.start(AGENT)
+    const id = await env.start(AGENT)
     await settle()
     const dir = join(root, 'w1', 'g', id)
     chmodSync(join(dir, JOURNAL_FILE), 0o400)
@@ -207,7 +228,7 @@ edges: []
   it('GRF-C181 a journal of another version is listed but not resumed, and an unknown host contract is refused', async () => {
     const { root, files } = store()
     const env = testEnv({ store: files })
-    const id = env.start(AGENT)
+    const id = await env.start(AGENT)
     await settle()
     const path = join(root, 'w1', 'g', id, JOURNAL_FILE)
     writeFileSync(path, readFileSync(path, 'utf8').replaceAll('"v":1', '"v":2'))

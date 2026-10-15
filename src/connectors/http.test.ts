@@ -84,7 +84,9 @@ describe('the http connector', () => {
       })
     })
     const env = harness(connection(`${base}/v1`))
-    const id = env.start(graph('{ method: POST, path: "/items", query: { q: a }, body: { n: 1 } }'))
+    const id = await env.start(
+      graph('{ method: POST, path: "/items", query: { q: a }, body: { n: 1 } }'),
+    )
     await finished(env, id)
     expect(seen).toEqual([
       { url: '/v1/items?q=a', auth: `Bearer ${SECRET}`, method: 'POST', body: '{"n":1}' },
@@ -123,7 +125,7 @@ describe('the http connector', () => {
       ['big', '{ path: "/big" }'],
       ['here', '{ path: "/here" }'],
     ] as const) {
-      const id = env.start(graph(input))
+      const id = await env.start(graph(input))
       await finished(env, id)
       errors[name] = String(env.run(id).state.state.err)
       if (name === 'here') expect(env.run(id).state.state.status).toBe(200)
@@ -142,7 +144,7 @@ describe('the http connector', () => {
     const base = await serve(() => {})
     const clock = new FakeClock()
     const env = harness(connection(base), clock)
-    const id = env.start(graph('{ path: "/slow" }'))
+    const id = await env.start(graph('{ path: "/slow" }'))
     await new Promise((r) => setTimeout(r, 50))
     await clock.advance(HTTP_TIMEOUT_MS)
     await finished(env, id)
@@ -190,7 +192,7 @@ describe('the http connector', () => {
       res.end('ok')
     })
     const env = harness(connection(`${base}/v1`))
-    const id = env.start(graph('{ path: "/%2e%2e/admin" }'))
+    const id = await env.start(graph('{ path: "/%2e%2e/admin" }'))
     await finished(env, id)
     expect(String(env.run(id).state.state.err)).toContain("a path under the connection's base URL")
     expect(hits).toBe(0)
@@ -205,7 +207,7 @@ describe('the http connector', () => {
       } else res.end('ok')
     })
     const env = harness(connection(`${base}/v1`))
-    const id = env.start(graph('{ path: "/out" }'))
+    const id = await env.start(graph('{ path: "/out" }'))
     await finished(env, id)
     expect(env.run(id).state.state.err).toBe(HTTP_ERRORS.outsideBase)
   })
@@ -224,7 +226,7 @@ describe('the http connector', () => {
       { ...connection(base.replace('http://', `http://${userinfo}@`)) },
     ]) {
       const env = harness(conn)
-      const id = env.start(graph('{ path: "/x" }'))
+      const id = await env.start(graph('{ path: "/x" }'))
       await finished(env, id)
       const journal = JSON.stringify(
         (await env.store.read({ scope: 'w1', graph: 'g', runId: id }))?.lines ?? [],
@@ -261,7 +263,7 @@ describe('the http connector', () => {
           }),
         ],
       })
-      const id = env.start(graph('{ path: "/x" }'))
+      const id = await env.start(graph('{ path: "/x" }'))
       await finished(env, id)
       expect(env.run(id).state.state.err).toBe(message)
       const journal = JSON.stringify(

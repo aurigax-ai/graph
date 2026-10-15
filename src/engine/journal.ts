@@ -130,6 +130,7 @@ export function stampLine(body: LineBody, seq: number, t: number): Line {
 
 export class MemoryJournalStore implements JournalStore {
   private readonly runs = new Map<string, StoredRun>()
+  private readonly sizes = new Map<string, number>()
 
   private id(key: RunKey): string {
     return `${key.scope}/${key.graph}/${key.runId}`
@@ -143,6 +144,13 @@ export class MemoryJournalStore implements JournalStore {
   async append(key: RunKey, line: Line): Promise<void> {
     const run = this.runs.get(this.id(key))
     if (!run) throw new JournalError('journal-failed', 'no such run')
+    const bytes = Buffer.byteLength(`${JSON.stringify(line)}\n`)
+    if (bytes > JOURNAL_LINE_MAX)
+      throw new JournalError('journal-full', 'a journal line is over 512 KiB')
+    const size = this.sizes.get(this.id(key)) ?? 0
+    if (size + bytes > JOURNAL_MAX_BYTES)
+      throw new JournalError('journal-full', 'the journal is over 32 MiB')
+    this.sizes.set(this.id(key), size + bytes)
     run.lines.push(structuredClone(line))
   }
 
@@ -160,5 +168,6 @@ export class MemoryJournalStore implements JournalStore {
 
   async remove(key: RunKey): Promise<void> {
     this.runs.delete(this.id(key))
+    this.sizes.delete(this.id(key))
   }
 }

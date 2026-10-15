@@ -112,8 +112,10 @@ must pass.
 Runs are kept by a `JournalStore`, whose every method returns a promise: `FileJournalStore` (one
 folder per run, each line written and synced before the run goes on) and `MemoryJournalStore`
 (tests). A run's line is in the store before the step it records starts. Another store passes
-`journalStoreFailures` from `@aurigax-ai/wire/testing` when it returns no failures. `engine.recover`
-and `engine.summaries` return promises too.
+`journalStoreFailures` from `@aurigax-ai/wire/testing` when it returns no failures; give it `tear`
+and `break` when the store can lose a line's tail or refuse a write, so those are checked too.
+`engine.start` answers once the run is in the store (`journal-failed` when it cannot be created);
+`engine.recover` and `engine.summaries` return promises too.
 
 ## License
 

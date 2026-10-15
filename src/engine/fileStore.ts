@@ -7,7 +7,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
-  statSync,
+  truncateSync,
   writeFileSync,
   writeSync,
 } from 'node:fs'
@@ -128,11 +128,16 @@ export class FileJournalStore implements JournalStore {
   }
 
   private sizeOf(dir: string): number {
+    const path = join(dir, JOURNAL_FILE)
+    let text: Buffer
     try {
-      return statSync(join(dir, JOURNAL_FILE)).size
+      text = readFileSync(path)
     } catch {
       return 0
     }
+    const whole = text.lastIndexOf(0x0a) + 1
+    if (whole < text.length) truncateSync(path, whole)
+    return whole
   }
 
   async read(key: RunKey): Promise<StoredRun | null> {

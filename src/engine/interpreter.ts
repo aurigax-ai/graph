@@ -237,9 +237,8 @@ export class GraphRun {
     return this.state.active.size
   }
 
-  open(definition: unknown, start: Extract<LineBody, { type: 'run-start' }>): Promise<void> {
+  open(start: Extract<LineBody, { type: 'run-start' }>): Promise<void> {
     return this.serial(async () => {
-      await this.deps.store.create(this.deps.key, definition)
       await this.record(start)
       this.armTimeLimit()
       await this.pump()

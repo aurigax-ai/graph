@@ -34,7 +34,7 @@ function harness(definition: GraphDefinition, clock: FakeClock, mem = memory()) 
     memory: mem,
     fire: (g, payload) => {
       started.push(payload)
-      env.engine.start('w1', g.definition, payload, {})
+      void env.engine.start('w1', g.definition, payload, {})
     },
     timezone: 'UTC',
   })

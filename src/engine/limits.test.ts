@@ -22,7 +22,7 @@ async function nodeRuns(
   runId: string,
   node?: string,
 ): Promise<number[]> {
-  return ((await await env.store.read({ scope: 'w1', graph: 'g', runId }))?.lines ?? [])
+  return ((await env.store.read({ scope: 'w1', graph: 'g', runId }))?.lines ?? [])
     .filter((l) => l.type === 'node-start' && (node === undefined || l.node === node))
     .map((l) => l.t)
 }
@@ -54,7 +54,7 @@ edges: []
 describe('limits, retries and triggers', () => {
   it('GRF-C42 a loop that never ends stops at its step limit with one notification', async () => {
     const env = testEnv()
-    const id = env.start(LOOP)
+    const id = await env.start(LOOP)
     await settle()
     expect(await nodeRuns(env, id)).toHaveLength(6)
     expect(env.run(id).state.status).toBe('step-limit')
@@ -63,9 +63,9 @@ describe('limits, retries and triggers', () => {
 
   it('GRF-C49 with concurrency skip a second trigger during a waiting run is skipped and counted', async () => {
     const env = testEnv()
-    env.start(WAITING)
+    await env.start(WAITING)
     await settle()
-    const second = env.engine.start('w1', definition(WAITING), {}, {})
+    const second = await env.engine.start('w1', definition(WAITING), {}, {})
     expect(second).toMatchObject({ ok: false, error: 'skipped' })
     expect(env.engine.active('w1')).toHaveLength(1)
     expect(env.engine.skippedCount('w1', 'g')).toBe(1)
@@ -74,10 +74,15 @@ describe('limits, retries and triggers', () => {
   it('GRF-C175 with concurrency queue one run waits for the first and the third is skipped', async () => {
     const env = testEnv()
     const text = WAITING.replace('start: a', 'concurrency: queue\nstart: a')
-    env.start(text)
+    await env.start(text)
     await settle()
-    expect(env.engine.start('w1', definition(text), {}, {})).toEqual({ ok: true, queued: true })
-    expect(env.engine.start('w1', definition(text), {}, {})).toMatchObject({ error: 'skipped' })
+    expect(await env.engine.start('w1', definition(text), {}, {})).toEqual({
+      ok: true,
+      queued: true,
+    })
+    expect(await env.engine.start('w1', definition(text), {}, {})).toMatchObject({
+      error: 'skipped',
+    })
     await env.answer('Approve')
     await settle()
     expect(env.engine.active('w1')).toHaveLength(1)
@@ -86,7 +91,7 @@ describe('limits, retries and triggers', () => {
 
   it('GRF-C54 a timeout raises Timeout to its catch, leaves the agent and ignores its later stop', async () => {
     const env = testEnv()
-    const id = env.start(`version: 1
+    const id = await env.start(`version: 1
 on: [{ manual: {} }]
 start: a
 state: { n: { type: integer, default: 0 } }
@@ -110,7 +115,7 @@ edges: []
     const env = testEnv()
     let calls = 0
     env.commandReply = () => reply(++calls < 3 ? 1 : 0)
-    const id = env.start(`version: 1
+    const id = await env.start(`version: 1
 on: [{ manual: {} }]
 start: a
 state: { n: { type: integer, default: 0 } }
@@ -132,7 +137,7 @@ edges:
 
   it('GRF-C170 All catches a node’s Timeout but never the step limit reached inside its retries', async () => {
     const env = testEnv()
-    const caught = env.start(`version: 1
+    const caught = await env.start(`version: 1
 on: [{ manual: {} }]
 start: a
 state: { err: { type: object, default: {} } }
@@ -149,7 +154,7 @@ edges:
 
     const limited = testEnv()
     limited.commandReply = () => reply(1)
-    const id = limited.start(`version: 1
+    const id = await limited.start(`version: 1
 on: [{ manual: {} }]
 start: a
 state: { n: { type: integer, default: 0 } }
@@ -166,7 +171,7 @@ edges: []
   it('GRF-C171 an agent without retry is not run again on NoResult; with retry it runs once more and then hits agent-limit', async () => {
     const result = 'result: { type: object, properties: { v: { type: string } }, required: [v] }'
     const plain = testEnv()
-    const one = plain.start(`version: 1
+    const one = await plain.start(`version: 1
 on: [{ manual: {} }]
 start: a
 state: { n: { type: integer, default: 0 } }
@@ -180,7 +185,7 @@ edges: []
     expect(plain.run(one).state.failure).toMatchObject({ name: 'NoResult' })
 
     const retried = testEnv()
-    const two = retried.start(`version: 1
+    const two = await retried.start(`version: 1
 on: [{ manual: {} }]
 start: a
 state: { n: { type: integer, default: 0 } }
@@ -200,7 +205,7 @@ edges: []
 
   it('GRF-C98 a loop that starts an agent each round ends agent-limit before the third', async () => {
     const env = testEnv()
-    const id = env.start(`version: 1
+    const id = await env.start(`version: 1
 on: [{ manual: {} }]
 start: a
 state: { n: { type: integer, default: 0 } }
@@ -223,7 +228,7 @@ edges:
 
   it('GRF-C172 the time limit ends a run waiting at an approval, withdraws it and notifies once', async () => {
     const env = testEnv()
-    const id = env.start(WAITING.replace('nodes:', 'limits: { time: 1h }\nnodes:'))
+    const id = await env.start(WAITING.replace('nodes:', 'limits: { time: 1h }\nnodes:'))
     await settle()
     await env.clock.advance(60 * 60_000)
     expect(env.run(id).state.status).toBe('time-limit')
@@ -244,7 +249,7 @@ edges: []
 `
     const results = []
     for (let i = 0; i < 6; i++) {
-      results.push(env.engine.start('w1', definition(text), {}, {}))
+      results.push(await env.engine.start('w1', definition(text), {}, {}))
       await settle()
       await env.clock.advance(10 * 60_000 - 1)
     }
@@ -256,10 +261,10 @@ edges: []
   it('GRF-C99 a fifth active run in one workspace is skipped', async () => {
     const env = testEnv()
     for (let i = 1; i <= 4; i++) {
-      expect(env.engine.start('w1', definition(WAITING, `g${i}`), {}, {}).ok).toBe(true)
+      expect((await env.engine.start('w1', definition(WAITING, `g${i}`), {}, {})).ok).toBe(true)
     }
     await settle()
-    expect(env.engine.start('w1', definition(WAITING, 'g5'), {}, {})).toMatchObject({
+    expect(await env.engine.start('w1', definition(WAITING, 'g5'), {}, {})).toMatchObject({
       error: 'skipped',
     })
   })
@@ -274,7 +279,7 @@ edges: []
       },
       store: env.store,
     })
-    const res = headless.start(
+    const res = await headless.start(
       'w1',
       definition(`version: 1
 on: [{ manual: {} }]

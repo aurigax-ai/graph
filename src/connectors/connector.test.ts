@@ -47,7 +47,7 @@ describe('the connector kind', () => {
       calls.push({ server, tool, input })
       return { ok: true, text: `echo: ${String(input.text)}` }
     })
-    const id = env.start(
+    const id = await env.start(
       text(
         '{ id: a, kind: connector, with: { use: "mcp:fake/echo", input: { text: "{{state.task}}" } }, out: { data.text: answer } }',
       ),
@@ -60,10 +60,12 @@ describe('the connector kind', () => {
 
   it('fails with ConnectorFailed and the host message, and a catch keeps the run going', async () => {
     const env = harness(async () => ({ ok: false, error: 'mcp server fake is off' }))
-    const failing = env.start(text('{ id: a, kind: connector, with: { use: "mcp:fake/echo" } }'))
+    const failing = await env.start(
+      text('{ id: a, kind: connector, with: { use: "mcp:fake/echo" } }'),
+    )
     await settle()
     expect(env.run(failing).state.status).toBe('failed')
-    const caught = env.start(
+    const caught = await env.start(
       text(
         '{ id: a, kind: connector, with: { use: "mcp:fake/echo" }, out: { error.message: err }, catch: [{ errors: [ConnectorFailed], then: continue }] }',
       ),
@@ -135,7 +137,7 @@ edges: [{ from: a, to: b }, { from: b, to: c }]
         }),
       ],
     })
-    const id = env.start(
+    const id = await env.start(
       text(
         '{ id: a, kind: connector, with: { use: "leaky.request", input: { path: "/x" } }, out: { error.message: err }, catch: [{ errors: [ConnectorFailed], then: continue }] }',
       ),

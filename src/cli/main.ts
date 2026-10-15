@@ -66,7 +66,7 @@ async function runHere(
     log: (n) => process.stderr.write(`notify: ${n.title}${n.body ? ` — ${n.body}` : ''}\n`),
   })
   const engine = new Engine({ host, store: new FileJournalStore(data) })
-  const res = engine.start(
+  const res = await engine.start(
     'local',
     { name: loaded.value.name, graph: loaded.value.graph, fingerprint: loaded.value.fingerprint },
     {},

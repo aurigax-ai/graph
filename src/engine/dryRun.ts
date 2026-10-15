@@ -107,7 +107,7 @@ export async function dryRun(
   }
   const store = new MemoryJournalStore()
   const engine = new Engine({ host, store })
-  const started = engine.start(
+  const started = await engine.start(
     'dry-run',
     { name: loaded.name, graph: loaded.graph, fingerprint: loaded.fingerprint },
     { dryRun: true },
