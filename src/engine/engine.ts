@@ -11,7 +11,7 @@ import {
 import { FORMAT_KINDS, descriptorOf } from '../kinds/catalog.ts'
 import type { Host, Output } from './contract.ts'
 import { type BoundKind, GraphRun, NOTIFIED_ENDS, type RunLimits } from './interpreter.ts'
-import type { JournalStore, RunKey, RunStatus } from './journal.ts'
+import type { JournalStore, Line, RunKey, RunStatus } from './journal.ts'
 import { type RunState, isEnded, newRunState, replay } from './runState.ts'
 import { type RunSummary, summarize } from './summary.ts'
 
@@ -100,7 +100,7 @@ export interface EngineOptions {
   host: Host
   store: JournalStore
   ceilings?: Partial<Ceilings>
-  changed?: (runId: string) => void
+  changed?: (runId: string, line?: Line) => void
   dryRun?: boolean
 }
 
@@ -108,6 +108,7 @@ export class Engine {
   private readonly runs = new Map<string, GraphRun>()
   private readonly records = new Map<string, GraphRecord>()
   private readonly kinds: Map<string, BoundKind>
+  private held = false
   ceilings: Ceilings
 
   constructor(private readonly opts: EngineOptions) {
@@ -123,6 +124,10 @@ export class Engine {
 
   get host(): Host {
     return this.opts.host
+  }
+
+  storeOf(): JournalStore {
+    return this.opts.store
   }
 
   private record(scope: string, graph: string): GraphRecord {
@@ -161,7 +166,7 @@ export class Engine {
     const now = this.opts.host.clock.now()
     if (now - record.lastNotice < HOUR_MS) return
     record.lastNotice = now
-    this.opts.host.notify({ title, body, graph, ...(runId ? { run: runId } : {}) })
+    this.opts.host.notify({ title, body, graph, scope, ...(runId ? { run: runId } : {}) })
   }
 
   active(scope?: string): GraphRun[] {
@@ -243,8 +248,9 @@ export class Engine {
         store: this.opts.store,
         key,
         limits,
-        changed: () => this.opts.changed?.(key.runId),
+        changed: (line) => this.opts.changed?.(key.runId, line),
         ended: (status) => this.ended(key, status),
+        held: () => this.held,
       },
       state,
     )
@@ -322,6 +328,16 @@ export class Engine {
       else summaries.push(summarize(key, replay(key.runId, key.graph, graph, stored.lines)))
     }
     return summaries
+  }
+
+  hold(): void {
+    this.held = true
+  }
+
+  running(): boolean {
+    return this.active().some((run) =>
+      [...run.state.active.values()].some((a) => a.phase === 'running'),
+    )
   }
 
   stopAll(): void {

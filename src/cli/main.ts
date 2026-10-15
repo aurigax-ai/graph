@@ -15,6 +15,7 @@ import {
 } from './commands.ts'
 import { headlessHost } from './headlessHost.ts'
 import { runtimeCommand } from './runtimeCommands.ts'
+import { listCommand, runsCommand, showRunCommand, startCommand } from './runtimeVerbs.ts'
 
 const USAGE = `usage: wire <command>
   validate <file>                 check a graph file
@@ -23,7 +24,11 @@ const USAGE = `usage: wire <command>
   explain <file>                  print an outline of a graph
   dry-run <file> [--input k=v]... [--input-json <json>] [--mock <node>=<json>]... [--json]
   run <file> [--input k=v]... [--data <dir>]   run a graph here until it ends
-  show <run> [--data <dir>] [--node <id>]       print a run node by node
+  show <run> --data <dir> [--node <id>]        print a run of wire run node by node
+  list                                         the graphs the Graph Runtime holds for this folder
+  start <name> [--input k=v]...                start an enabled graph with agents: true here
+  runs                                         the runs of this folder
+  show <run> [--node <id>]                     print a run of this folder node by node
   runtime start [--daemon] [--foreground]      start the Graph Runtime (wire-runtime)
   runtime stop | status                        stop it, or say whether and how it runs
   runtime tokens revoke <client>               revoke a client's token`
@@ -136,9 +141,18 @@ export async function main(argv: string[], cwd = process.cwd()): Promise<Command
         ? runHere(file, cwd, data, parsed.values.input ?? [])
         : { exitCode: 2, stdout: `${USAGE}\n` }
     case 'show':
-      return parsed.rest[0]
+      if (!parsed.rest[0]) return { exitCode: 2, stdout: `${USAGE}\n` }
+      return parsed.values.data
         ? show(parsed.rest[0], data, parsed.values.node?.[0])
+        : showRunCommand(cwd, parsed.rest[0], parsed.values.node?.[0])
+    case 'list':
+      return listCommand(cwd)
+    case 'start':
+      return parsed.rest[0]
+        ? startCommand(cwd, parsed.rest[0], parsed.values.input ?? [])
         : { exitCode: 2, stdout: `${USAGE}\n` }
+    case 'runs':
+      return runsCommand(cwd)
     default:
       return { exitCode: 2, stdout: `${USAGE}\n` }
   }

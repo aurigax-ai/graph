@@ -19,7 +19,7 @@ export const realClock: Clock = {
   },
 }
 
-export function runProcess(cwd: string, baseEnv: NodeJS.ProcessEnv) {
+export function runProcess(cwd: string, baseEnv: NodeJS.ProcessEnv, groups?: Set<number>) {
   return (req: ProcessRequest): Promise<ProcessReply> =>
     new Promise((resolve) => {
       const [file, ...args] = req.argv
@@ -36,6 +36,7 @@ export function runProcess(cwd: string, baseEnv: NodeJS.ProcessEnv) {
         detached: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
+      if (child.pid) groups?.add(child.pid)
       const kill = (): void => {
         try {
           if (child.pid) process.kill(-child.pid, 'SIGKILL')
@@ -57,6 +58,7 @@ export function runProcess(cwd: string, baseEnv: NodeJS.ProcessEnv) {
         errBytes += chunk.length
       })
       const finish = (exitCode: number): void => {
+        if (child.pid) groups?.delete(child.pid)
         clearTimeout(timer)
         req.signal.removeEventListener('abort', kill)
         resolve({

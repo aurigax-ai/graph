@@ -15,6 +15,7 @@ import {
 import {
   JournalError,
   type JournalStore,
+  type Line,
   type LineBody,
   type RunKey,
   type RunStatus,
@@ -66,8 +67,9 @@ export interface RunDeps {
   store: JournalStore
   key: RunKey
   limits: RunLimits
-  changed: () => void
+  changed: (line?: Line) => void
   ended: (status: RunStatus) => void
+  held: () => boolean
 }
 
 interface Live {
@@ -132,7 +134,7 @@ export class GraphRun {
       throw new JournalError('journal-failed', thrownMessage(err))
     }
     const effect = applyLine(this.state, line)
-    this.deps.changed()
+    this.deps.changed(line)
     return effect
   }
 
@@ -256,7 +258,12 @@ export class GraphRun {
   private async pump(): Promise<void> {
     if (isEnded(this.state.status)) return
     const launches: (() => void)[] = []
-    while (!this.state.paused && !this.state.failure && this.state.ready.length > 0) {
+    while (
+      !this.deps.held() &&
+      !this.state.paused &&
+      !this.state.failure &&
+      this.state.ready.length > 0
+    ) {
       if (this.running() >= this.deps.limits.parallel) break
       const id = this.state.ready[0] as string
       const started = await this.startNode(
@@ -313,6 +320,7 @@ export class GraphRun {
     override?: Output,
     launches?: (() => void)[],
   ): Promise<boolean> {
+    if (this.deps.held()) return false
     if (this.state.steps >= this.deps.limits.steps) {
       await this.end('step-limit')
       return false

@@ -50,6 +50,31 @@ error has JSON-RPC code -32000.
 |---|---|---|---|
 | `hello` | | `{ contract, token }` | `{ contract, version, pid, mode, client, rights }` |
 | `runtime.status` | `observe` | `{}` | `{ pid, version, contract, mode, clients }` |
+| `scopes.register` | `observe` | `{ folder, sandboxed?, scratch? }` | `{ scope, folder, sandboxed }` |
+| `graphs.load` | `observe` | `{ scope, path }` | a graph |
+| `graphs.unload` | `observe` | `{ scope, name }` | `{ ok }` |
+| `graphs.list` | `observe` | `{ scope }` | graphs |
+| `graphs.enable` | `enable` | `{ scope, name, fingerprint }` | a graph |
+| `graphs.disable` | `enable` | `{ scope, name }` | a graph |
+| `runs.list` | `observe` | `{ scope }` | run summaries |
+| `runs.show` | `observe` | `{ scope, runId, node? }` | a run, node by node |
+| `runs.start` | `start` | `{ scope, name, input?, inputs?, by? }` | `{ runId }` or `{ queued: true }` |
+| `runs.control` | `control` | `{ scope, runId, action, node? }` | `{ ok }` |
+
+A scope is a real folder, `dir:<real path>`, the same for every client. `scopes.register` resolves
+the folder and refuses a scratch one (`scratch`); only a client with `worker` sets or clears its
+`sandboxed` flag, which the runtime keeps in `<data>/scopes.json` until that client clears it. A
+client loads, unloads and starts graphs only in scopes it registered on its connection; a graph
+file is read only inside its scope's folder, and again at every list and start.
+
+A graph is `{ scope, name, path, state, fingerprint?, manual?: { agents, input }, problems }`, with
+`state` one of `enabled`, `changed`, `not-enabled`, `invalid`. `graphs.enable` needs the
+fingerprint the client showed (`changed` when the file differs); a change outside `ui` disables the
+graph, and enable records live in `<data>/enabled.json`. `runs.start` starts only an enabled graph
+with a manual trigger: a client with `control` may say `by: "human"`, any other start is an
+agent's and needs `agents: true` on the trigger (`not-for-agents`). `input` is an object, `inputs`
+a list of `key=value`. `action` is `pause`, `resume`, `cancel`, `retry`, or `rerun`, `skip` and
+`continue` for an interrupted `node`.
 
 `mode` is `client` (the runtime exits 60 s after its last client leaves while no run is active
 or waiting on a timer) or `daemon` (started with `--daemon`; it runs until `wire runtime stop`).
@@ -60,3 +85,6 @@ The runtime sends events as notifications to every client holding their right.
 
 | Event | Right | Params |
 |---|---|---|
+| `graph.changed` | `observe` | `{ scope, name, state?, notice?: { title, body? }, runId? }` |
+| `node.changed` | `observe` | `{ scope, runId, node, type }` |
+| `run.changed` | `observe` | `{ scope, runId, graph, status }` |
