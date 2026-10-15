@@ -324,6 +324,30 @@ edges:
     expect(both.run(twice).state.status).toBe('done')
   })
 
+  it('GRF-C33 a join whose last branch to settle was not taken still runs once', async () => {
+    const env = testEnv()
+    const id = env.start(`${head('  route: { type: integer, default: 0 }', 'f')}nodes:
+  - { id: f, kind: router }
+  - { id: a, kind: router }
+  - { id: w, kind: wait, with: { for: 1m } }
+  - { id: pick, kind: router }
+  - { id: b, kind: router }
+  - { id: c, kind: router }
+edges:
+  - { from: f, to: [a, w] }
+  - { from: w, to: pick }
+  - from: pick
+    when: [{ if: "state.route == 1", to: b }]
+    else: end
+  - { from: [a, b], to: c }
+`)
+    await settle()
+    expect(await ends(env, id)).toEqual(['f', 'a'])
+    await env.clock.advance(60_000)
+    await settle()
+    expect(await ends(env, id)).toEqual(['f', 'a', 'w', 'pick', 'c'])
+    expect(env.run(id).state.status).toBe('done')
+  })
 
   it('GRF-C43 an uncaught error in one branch fails the run, starts nothing new and keeps the running node’s output', async () => {
     const env = testEnv()

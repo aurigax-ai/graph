@@ -181,7 +181,9 @@ export function applyLine(run: RunState, line: Line): string | null {
       const sources = joinOf(run.graph, line.from, line.to)
       if (line.outcome === 'skipped') {
         if (!sources) return null
-        return markJoin(run, line.to, sources, line.from, 'skipped') === 'skipped' ? line.to : null
+        const outcome = markJoin(run, line.to, sources, line.from, 'skipped')
+        if (outcome === 'ready') enqueue(run, line.to)
+        return outcome === 'skipped' ? line.to : null
       }
       if (!sources) {
         enqueue(run, line.to)
