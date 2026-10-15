@@ -106,6 +106,7 @@ export class RuntimeRuns implements Part {
         process.kill(-pid, 'SIGKILL')
       } catch {}
     }
+    this.engine.stopAll()
   }
 
   async recover(): Promise<void> {
@@ -183,7 +184,7 @@ export class RuntimeRuns implements Part {
         ...(session.rights.has('worker') ? { sandboxed: p.sandboxed } : {}),
       })
       this.ownedBy(session).add(scope.key)
-      void this.engine.recover(scope.key)
+      void this.engine.recover(scope.key).catch(() => {})
       return { scope: scope.id, folder: scope.folder, sandboxed: scope.sandboxed }
     })
     server.method('graphs.load', 'observe', (raw, session) => {

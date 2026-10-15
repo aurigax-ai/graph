@@ -200,6 +200,11 @@ export class GraphRun {
     return this.liveOf(id)
   }
 
+  dispose(): void {
+    for (const cancel of this.runTimers.splice(0)) cancel()
+    for (const id of [...this.live.keys()]) this.dropLive(id, false)
+  }
+
   private dropLive(id: string, abort: boolean): void {
     const live = this.live.get(id)
     if (!live) return

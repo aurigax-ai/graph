@@ -341,6 +341,7 @@ export class Engine {
   }
 
   stopAll(): void {
+    for (const run of this.runs.values()) run.dispose()
     this.runs.clear()
   }
 }

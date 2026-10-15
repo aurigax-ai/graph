@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
 import { readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import { type LoadedGraph, readGraphFile } from '../format/graphFile.ts'
-import { NAME_PATTERN, type Problem, isRecord } from '../format/model.ts'
+import { NAME_PATTERN, type Problem, isRecord, problem } from '../format/model.ts'
 import { RpcError } from './server.ts'
 
 export const SCOPES_FILE = 'scopes.json'
@@ -61,6 +61,15 @@ function realOf(path: string): string {
   } catch {
     return path
   }
+}
+
+export function insideFolder(path: string, folder: string): boolean {
+  if (!isAbsolute(path)) return false
+  const under = (p: string) => {
+    const rel = relative(folder, p)
+    return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+  }
+  return under(resolve(path)) && under(realOf(path))
 }
 
 export function scopeKey(id: string): string {
@@ -141,6 +150,8 @@ export class Registry {
 
   load(scope: Scope, path: unknown): Listing {
     if (typeof path !== 'string') throw new RpcError('bad-path')
+    if (!insideFolder(path, scope.folder))
+      throw new RpcError('outside-folder: a graph file is read only inside its folder')
     const read = readGraphFile(path, scope.folder)
     if (!read.ok)
       throw new RpcError(`invalid: ${read.problems[0]?.message ?? 'the file does not load'}`)
@@ -161,8 +172,13 @@ export class Registry {
   listing(scope: Scope, name: string): Listing {
     const path = scope.graphs[name]
     if (!path) throw new RpcError('unknown-graph')
-    const realPath = realOf(path)
-    const read = readGraphFile(path, scope.folder)
+    const realPath = resolve(path)
+    const read = insideFolder(path, scope.folder)
+      ? readGraphFile(path, scope.folder)
+      : {
+          ok: false as const,
+          problems: [problem('outside-folder', `${path} is outside ${scope.folder}`)],
+        }
     if (!read.ok || read.value.name !== name) {
       this.disable(scope.id, realPath, true)
       return {
