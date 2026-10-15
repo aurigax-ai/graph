@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { acquireLock } from './lock.ts'
 import { PathRefusal, type RuntimePaths, ensurePrivateDir, runtimePaths } from './paths.ts'
+import { RuntimeRuns } from './runs.ts'
 import { RUNTIME_CONTRACT, RuntimeServer } from './server.ts'
 import { Tokens } from './tokens.ts'
 
@@ -135,6 +136,9 @@ export async function startRuntime(opts: RuntimeOptions = {}): Promise<StartOutc
   let runtime: Runtime
   try {
     runtime = new Runtime(paths, lock.release, opts)
+    const runs = new RuntimeRuns(runtime)
+    runtime.add(runs)
+    await runs.recover()
     await runtime.server.listen(paths.socket)
   } catch (err) {
     lock.release()

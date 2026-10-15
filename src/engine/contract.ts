@@ -99,6 +99,7 @@ export interface Notice {
   body?: string
   run?: string
   graph?: string
+  scope?: string
 }
 
 export interface Host {

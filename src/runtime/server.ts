@@ -11,7 +11,7 @@ import {
 import type { Right, Tokens } from './tokens.ts'
 
 export const RUNTIME_CONTRACT = 1
-export const RUNTIME_EVENTS: readonly string[] = []
+export const RUNTIME_EVENTS: readonly string[] = ['graph.changed', 'node.changed', 'run.changed']
 export const MAX_CLIENTS = 32
 export const MAX_UNAUTHENTICATED = 16
 export const HELLO_TIMEOUT_MS = 10_000

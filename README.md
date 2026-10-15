@@ -24,11 +24,11 @@ wire validate review.yaml
 wire explain review.yaml
 wire dry-run review.yaml --input task="fix the total" --mock review='{"verdict":"pass"}'
 wire run review.yaml --input task="fix the total"
-wire show <run>
+wire show <run> --data .wire/runs
 ```
 
 `schema` prints the graph file's JSON Schema and `nodes` lists the node kinds the headless host
-runs. `run` keeps its runs under `.wire/runs` in the current folder (`--data <dir>` to change it).
+runs. `run` keeps its runs under `.wire/runs` in the current folder (`--data <dir>` to change it), and `show` reads them with `--data`.
 The headless host runs `command`, `router`, `wait` and `notify` nodes; nodes that need an agent or
 a human are for a host that has them.
 
@@ -47,6 +47,13 @@ wire runtime status           # whether it runs, its pid, version and mode
 wire runtime stop             # lets started steps reach their next journal line, then exits
 wire runtime tokens revoke <client>
 ```
+
+In a folder, `wire list` shows the graphs the runtime holds for it, `wire start <name>` starts an
+enabled graph whose manual trigger says `agents: true`, `wire runs` lists the folder's runs and
+`wire show <run>` prints one node by node; each starts the runtime when none runs. A folder is
+the runtime's scope (`dir:<real path>`), whichever client registered it. The CLI never enables a
+graph: that right belongs to a client that pairs with the runtime and asks its human, and a
+change to a graph outside `ui` disables it again.
 
 To keep it running across logins, install one of the documented files after putting your own two
 paths in it, the Node it runs on (`command -v node`) and the package's `dist/cli/bin.js`
