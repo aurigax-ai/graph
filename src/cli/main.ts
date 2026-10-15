@@ -66,7 +66,7 @@ async function runHere(
     log: (n) => process.stderr.write(`notify: ${n.title}${n.body ? ` — ${n.body}` : ''}\n`),
   })
   const engine = new Engine({ host, store: new FileJournalStore(data) })
-  const res = engine.start(
+  const res = await engine.start(
     'local',
     { name: loaded.value.name, graph: loaded.value.graph, fingerprint: loaded.value.fingerprint },
     {},
@@ -89,10 +89,10 @@ async function runHere(
   }
 }
 
-function show(runId: string, data: string, node?: string): CommandOutput {
+async function show(runId: string, data: string, node?: string): Promise<CommandOutput> {
   const store = new FileJournalStore(data)
-  const key = store.list().find((k) => k.runId === runId)
-  const stored = key ? store.read(key) : null
+  const key = (await store.list()).find((k) => k.runId === runId)
+  const stored = key ? await store.read(key) : null
   const graph = (stored?.definition as { graph?: Parameters<typeof runView>[1] } | undefined)?.graph
   if (!key || !stored || !graph)
     return { exitCode: 1, stdout: `${JSON.stringify({ ok: false, error: 'unknown-run' })}\n` }

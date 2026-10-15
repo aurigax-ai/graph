@@ -34,7 +34,7 @@ function harness(definition: GraphDefinition, clock: FakeClock, mem = memory()) 
     memory: mem,
     fire: (g, payload) => {
       started.push(payload)
-      env.engine.start('w1', g.definition, payload, {})
+      void env.engine.start('w1', g.definition, payload, {})
     },
     timezone: 'UTC',
   })
@@ -49,7 +49,7 @@ describe('the schedule trigger', () => {
     await clock.advance(16 * MINUTE_MS)
     await settle()
     expect(started).toHaveLength(3)
-    expect(env.store.list('w1')).toHaveLength(3)
+    expect(await env.store.list('w1')).toHaveLength(3)
     expect(env.engine.active('w1')).toEqual([])
   })
 
@@ -66,7 +66,7 @@ describe('the schedule trigger', () => {
       const again = harness(definition, clock, first.mem)
       await settle()
       expect(again.started).toHaveLength(runs)
-      expect(again.env.store.list('w1')).toHaveLength(runs)
+      expect(await again.env.store.list('w1')).toHaveLength(runs)
       if (runs === 1) expect(again.started[0]).toMatchObject({ caughtUp: true })
     }
   })

@@ -10,13 +10,13 @@ state:
 ${state}
 `
 
-function ends(env: ReturnType<typeof testEnv>, runId: string): string[] {
-  const stored = env.store.read({ scope: 'w1', graph: 'g', runId })
+async function ends(env: ReturnType<typeof testEnv>, runId: string): Promise<string[]> {
+  const stored = await env.store.read({ scope: 'w1', graph: 'g', runId })
   return (stored?.lines ?? []).flatMap((l) => (l.type === 'node-end' ? [l.node] : []))
 }
 
-function lines(env: ReturnType<typeof testEnv>, runId: string) {
-  return env.store.read({ scope: 'w1', graph: 'g', runId })?.lines ?? []
+async function lines(env: ReturnType<typeof testEnv>, runId: string) {
+  return (await env.store.read({ scope: 'w1', graph: 'g', runId }))?.lines ?? []
 }
 
 const reply = (stdout: string, exitCode = 0) => ({
@@ -32,7 +32,7 @@ describe('running a graph', () => {
     const env = testEnv()
     env.commandReply = () => reply('0123456789abcdefghijKLMNOPQRST')
     const id =
-      env.start(`${head('  count: { type: integer, default: 0 }\n  log: { type: string, max: 10 }')}nodes:
+      await env.start(`${head('  count: { type: integer, default: 0 }\n  log: { type: string, max: 10 }')}nodes:
   - { id: a, kind: command, with: { run: [x] }, out: { stdout: log } }
 edges: []
 `)
@@ -43,7 +43,7 @@ edges: []
 
   it('GRF-C16 an output of the wrong type for its key fails the node with BadOutput and writes nothing', async () => {
     const env = testEnv()
-    const id = env.start(`${head('  n: { type: integer, default: 1 }')}nodes:
+    const id = await env.start(`${head('  n: { type: integer, default: 1 }')}nodes:
   - { id: a, kind: command, with: { run: [x] }, out: { stdout: n } }
 edges: []
 `)
@@ -66,7 +66,7 @@ edges: []
         (n, i) => `  - { id: ${n}, kind: command, with: { run: [x] }, out: { stdout: a${i + 1} } }`,
       )
       .join('\n')
-    const id = env.start(`${head(keys)}nodes:
+    const id = await env.start(`${head(keys)}nodes:
 ${nodes}
 edges:
   - { from: a, to: b }
@@ -84,7 +84,7 @@ edges:
   it('GRF-C19 appends from a fan-out land in the order the nodes end, and the journal records it', async () => {
     const env = testEnv()
     const id =
-      env.start(`${head('  notes: { type: array, items: { type: string }, merge: append, default: [] }', '[a, b]')}nodes:
+      await env.start(`${head('  notes: { type: array, items: { type: string }, merge: append, default: [] }', '[a, b]')}nodes:
   - { id: a, kind: agent, with: { mode: start, agent: claude, prompt: one }, out: { message: notes } }
   - { id: b, kind: agent, with: { mode: start, agent: claude, prompt: two }, out: { message: notes } }
 edges: []
@@ -94,13 +94,13 @@ edges: []
     await env.stop(b.pane, { message: 'from b' })
     await env.stop(a.pane, { message: 'from a' })
     expect(env.run(id).state.state.notes).toEqual(['from b', 'from a'])
-    expect(ends(env, id)).toEqual(['b', 'a'])
+    expect(await ends(env, id)).toEqual(['b', 'a'])
   })
 
   it('GRF-C21 and GRF-C40 a node reads the state from when it started; the join sees both writes', async () => {
     const env = testEnv()
     const id =
-      env.start(`${head('  x: { type: string, default: before }\n  seen: { type: string, default: "" }', 'f')}nodes:
+      await env.start(`${head('  x: { type: string, default: before }\n  seen: { type: string, default: "" }', 'f')}nodes:
   - { id: f, kind: router }
   - { id: a, kind: agent, with: { mode: start, agent: claude, prompt: "x is {{state.x}}" }, out: { message: seen } }
   - { id: b, kind: command, with: { run: [x] }, out: { stdout: x } }
@@ -122,7 +122,7 @@ edges:
 
   it('GRF-C22 a mapped output that is absent leaves its key untouched', async () => {
     const env = testEnv()
-    const id = env.start(`${head('  m: { type: string, default: kept }')}nodes:
+    const id = await env.start(`${head('  m: { type: string, default: kept }')}nodes:
   - { id: a, kind: agent, with: { mode: start, agent: claude, prompt: p }, out: { message: m } }
 edges: []
 `)
@@ -133,7 +133,7 @@ edges: []
 
   it('GRF-C23 an argv element is templated alone and never split', async () => {
     const env = testEnv()
-    env.start(
+    await env.start(
       `${head('  pr: { type: string }')}nodes:
   - { id: a, kind: command, with: { run: [gh, pr, checks, "{{state.pr}}"] } }
 edges: []
@@ -163,7 +163,7 @@ edges: []
       host: env.host,
       store: new MemoryJournalStore(),
     })
-    const res = fresh.start(
+    const res = await fresh.start(
       'w1',
       {
         name: 'g',
@@ -196,7 +196,7 @@ edges: []
 
   it('GRF-C26 a node that reads a key nobody wrote fails with MissingInput and starts nothing', async () => {
     const env = testEnv()
-    const id = env.start(`${head('  task: { type: string }')}nodes:
+    const id = await env.start(`${head('  task: { type: string }')}nodes:
   - { id: a, kind: agent, with: { mode: start, agent: claude, prompt: "do {{state.task}}" } }
 edges: []
 `)
@@ -218,24 +218,26 @@ edges:
     else: handler
 `
     const plain = testEnv()
-    const failed = plain.start(graph(''))
+    const failed = await plain.start(graph(''))
     await settle()
     expect(plain.run(failed).state.failure).toMatchObject({ node: 'test', name: 'ConditionError' })
-    expect(ends(plain, failed)).toEqual(['test'])
+    expect(await ends(plain, failed)).toEqual(['test'])
     const caught = testEnv()
-    const handled = caught.start(graph(', catch: [{ errors: [ConditionError], then: handler }]'))
+    const handled = await caught.start(
+      graph(', catch: [{ errors: [ConditionError], then: handler }]'),
+    )
     await settle()
     expect(caught.run(handled).state.status).toBe('done')
-    expect(ends(caught, handled)).toEqual(['test', 'handler'])
+    expect(await ends(caught, handled)).toEqual(['test', 'handler'])
     const missing = testEnv()
-    const m = missing.start(graph('').replace("state.count > 'abc'", 'state.missing == 1'))
+    const m = await missing.start(graph('').replace("state.count > 'abc'", 'state.missing == 1'))
     await settle()
     expect(missing.run(m).state.failure).toMatchObject({ name: 'ConditionError' })
   })
 
   it('GRF-C30 a start fan-out runs together and its join once after both', async () => {
     const env = testEnv()
-    const id = env.start(`${head('  n: { type: integer, default: 0 }', '[lint, test]')}nodes:
+    const id = await env.start(`${head('  n: { type: integer, default: 0 }', '[lint, test]')}nodes:
   - { id: lint, kind: agent, with: { mode: start, agent: claude, prompt: l } }
   - { id: test, kind: agent, with: { mode: start, agent: claude, prompt: t } }
   - { id: review, kind: agent, with: { mode: start, agent: claude, prompt: r } }
@@ -259,7 +261,7 @@ edges:
     ] as const) {
       const env = testEnv()
       env.commandReply = () => reply('', exit)
-      const id = env.start(`${head('  exit: { type: integer, default: -1 }', 'test')}nodes:
+      const id = await env.start(`${head('  exit: { type: integer, default: -1 }', 'test')}nodes:
   - { id: test, kind: command, with: { run: [x] }, out: { exit: exit } }
   - { id: review, kind: router }
   - { id: implement, kind: router }
@@ -269,7 +271,7 @@ edges:
     else: implement
 `)
       await settle()
-      expect(ends(env, id)).toEqual(['test', next])
+      expect(await ends(env, id)).toEqual(['test', next])
     }
   })
 
@@ -291,16 +293,18 @@ edges:
 `
     const env = testEnv()
     env.commandReply = () => reply('from a')
-    const id = env.start(graph(0))
+    const id = await env.start(graph(0))
     await settle()
-    expect(ends(env, id)).toEqual(['f', 'pick', 'a', 'c'])
+    expect(await ends(env, id)).toEqual(['f', 'pick', 'a', 'c'])
     expect(
-      lines(env, id).some((l) => l.type === 'edge' && l.to === 'b' && l.outcome === 'skipped'),
+      (await lines(env, id)).some(
+        (l) => l.type === 'edge' && l.to === 'b' && l.outcome === 'skipped',
+      ),
     ).toBe(true)
     expect(env.run(id).state.state.out).toBe('from a')
 
     const both = testEnv()
-    const twice = both.start(`${head('  route: { type: integer, default: 0 }', 'f')}nodes:
+    const twice = await both.start(`${head('  route: { type: integer, default: 0 }', 'f')}nodes:
   - { id: f, kind: router }
   - { id: p1, kind: router }
   - { id: p2, kind: router }
@@ -318,15 +322,40 @@ edges:
   - { from: [a, b], to: c }
 `)
     await settle()
-    expect(ends(both, twice)).toEqual(['f', 'p1', 'p2'])
+    expect(await ends(both, twice)).toEqual(['f', 'p1', 'p2'])
     expect(both.run(twice).state.status).toBe('done')
+  })
+
+  it('GRF-C231 a join whose last branch to settle was not taken still runs once', async () => {
+    const env = testEnv()
+    const id = await env.start(`${head('  route: { type: integer, default: 0 }', 'f')}nodes:
+  - { id: f, kind: router }
+  - { id: a, kind: router }
+  - { id: w, kind: wait, with: { for: 1m } }
+  - { id: pick, kind: router }
+  - { id: b, kind: router }
+  - { id: c, kind: router }
+edges:
+  - { from: f, to: [a, w] }
+  - { from: w, to: pick }
+  - from: pick
+    when: [{ if: "state.route == 1", to: b }]
+    else: end
+  - { from: [a, b], to: c }
+`)
+    await settle()
+    expect(await ends(env, id)).toEqual(['f', 'a'])
+    await env.clock.advance(60_000)
+    await settle()
+    expect(await ends(env, id)).toEqual(['f', 'a', 'w', 'pick', 'c'])
+    expect(env.run(id).state.status).toBe('done')
   })
 
   it('GRF-C43 an uncaught error in one branch fails the run, starts nothing new and keeps the running node’s output', async () => {
     const env = testEnv()
     env.commandReply = (req) =>
       req.argv[0] === 'boom' ? Promise.reject(new NodeError('ExitCode', 'boom')) : reply('ok')
-    const id = env.start(`${head('  o: { type: string, default: "" }', '[slow, boom]')}nodes:
+    const id = await env.start(`${head('  o: { type: string, default: "" }', '[slow, boom]')}nodes:
   - { id: slow, kind: agent, with: { mode: start, agent: claude, prompt: s }, out: { message: o } }
   - { id: boom, kind: command, with: { run: [boom] } }
   - { id: after, kind: router }
@@ -339,7 +368,7 @@ edges:
     await env.stop(env.agents[0].pane, { message: 'finished' })
     const run = env.run(id).state
     expect(run.status).toBe('failed')
-    expect(ends(env, id)).toEqual(['boom', 'slow'])
+    expect(await ends(env, id)).toEqual(['boom', 'slow'])
     expect(run.state.o).toBe('finished')
   })
 
@@ -364,7 +393,7 @@ edges:
       host: env.host,
       store: env.store,
     })
-    const res = engine.start(
+    const res = await engine.start(
       'w1',
       {
         name: 'g',
@@ -402,7 +431,7 @@ edges:
         truncated: false,
       } as never
     }
-    const bad = env.start(`${head('  n: { type: integer, default: 0 }')}nodes:
+    const bad = await env.start(`${head('  n: { type: integer, default: 0 }')}nodes:
   - { id: a, kind: command, with: { run: [x] } }
 edges: []
 `)
@@ -412,7 +441,7 @@ edges: []
     thrown.commandReply = () => {
       throw new Error('x'.repeat(500))
     }
-    const t = thrown.start(`${head('  n: { type: integer, default: 0 }')}nodes:
+    const t = await thrown.start(`${head('  n: { type: integer, default: 0 }')}nodes:
   - { id: a, kind: command, with: { run: [throw] } }
 edges: []
 `)
@@ -422,7 +451,7 @@ edges: []
 
   it('GRF-C55 a Stop with background work does not end the node; a prompt over 16000 characters is PromptTooLong', async () => {
     const env = testEnv()
-    const id = env.start(`${head('  n: { type: integer, default: 0 }')}nodes:
+    const id = await env.start(`${head('  n: { type: integer, default: 0 }')}nodes:
   - { id: a, kind: agent, with: { mode: start, agent: claude, prompt: p } }
 edges: []
 `)
@@ -433,7 +462,7 @@ edges: []
     expect(env.run(id).state.status).toBe('done')
 
     const long = testEnv()
-    const l = long.start(
+    const l = await long.start(
       `${head('  p: { type: string }')}nodes:
   - { id: a, kind: agent, with: { mode: start, agent: claude, prompt: "{{state.p}}" } }
 edges: []
@@ -453,23 +482,23 @@ edges:
   - { from: a, to: b }
 `
     const env = testEnv()
-    const failed = env.start(graph(''))
+    const failed = await env.start(graph(''))
     await settle()
     await env.answer('', 'dismissed')
     expect(env.run(failed).state.failure).toMatchObject({ node: 'a', name: 'Dismissed' })
     const caught = testEnv()
-    const ok = caught.start(graph(', catch: [{ errors: [Dismissed], then: continue }]'))
+    const ok = await caught.start(graph(', catch: [{ errors: [Dismissed], then: continue }]'))
     await settle()
     await caught.answer('', 'dismissed')
     const run = caught.run(ok).state
     expect(run.status).toBe('done')
     expect(run.state.err).toMatchObject({ name: 'Dismissed' })
-    expect(ends(caught, ok)).toEqual(['a', 'b'])
+    expect(await ends(caught, ok)).toEqual(['a', 'b'])
   })
 
   it('GRF-C63 a wait until a past time ends at once', async () => {
     const env = testEnv()
-    const id = env.start(`${head('  n: { type: integer, default: 0 }')}nodes:
+    const id = await env.start(`${head('  n: { type: integer, default: 0 }')}nodes:
   - { id: a, kind: wait, with: { until: "2020-01-01T00:00:00Z" } }
 edges: []
 `)
@@ -479,7 +508,7 @@ edges: []
 
   it('GRF-C160 a notify after a command goes out at once while an agent still works', async () => {
     const env = testEnv()
-    const id = env.start(`${head('  n: { type: integer, default: 0 }', 'f')}nodes:
+    const id = await env.start(`${head('  n: { type: integer, default: 0 }', 'f')}nodes:
   - { id: f, kind: router }
   - { id: slow, kind: agent, with: { mode: start, agent: claude, prompt: p } }
   - { id: cmd, kind: command, with: { run: [x] } }

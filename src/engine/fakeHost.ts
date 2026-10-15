@@ -134,7 +134,7 @@ export interface TestEnv extends FakeHostState {
   host: Host
   engine: Engine
   store: JournalStore
-  start: (text: string, input?: Output, trigger?: Output) => string
+  start: (text: string, input?: Output, trigger?: Output) => Promise<string>
   run: (runId: string) => NonNullable<ReturnType<Engine['run']>>
   stop: (pane: string, extra?: Output) => Promise<void>
   answer: (answer: string, outcome?: string) => Promise<void>
@@ -194,11 +194,11 @@ export function testEnv(
     host,
     engine,
     store,
-    start: (text: string, input: Output = {}, trigger: Output = {}) => {
+    start: async (text: string, input: Output = {}, trigger: Output = {}) => {
       const loaded = loadGraphText(text, '/w/.ostia/graphs/g.yaml')
       if (!loaded.ok)
         throw new Error(loaded.problems.map((p) => `${p.code}: ${p.message}`).join('\n'))
-      const res = engine.start(
+      const res = await engine.start(
         'w1',
         { name: 'g', graph: loaded.value.graph, fingerprint: loaded.value.fingerprint },
         trigger,

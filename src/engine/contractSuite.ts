@@ -47,7 +47,7 @@ export async function contractFailures(probe: ContractProbe): Promise<string[]> 
   const loaded = loadGraphText(PROBE(probe.command), '/probe/.ostia/graphs/probe.yaml')
   if (!loaded.ok) return [...failures, 'the probe graph does not validate']
   const engine = new Engine({ host, store: new MemoryJournalStore() })
-  const res = engine.start(
+  const res = await engine.start(
     'probe',
     { name: 'probe', graph: loaded.value.graph, fingerprint: loaded.value.fingerprint },
     {},

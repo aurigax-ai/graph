@@ -1,14 +1,13 @@
 import {
   chmodSync,
   closeSync,
-  existsSync,
   fsyncSync,
   mkdirSync,
   openSync,
   readFileSync,
   readdirSync,
   rmSync,
-  statSync,
+  truncateSync,
   writeFileSync,
   writeSync,
 } from 'node:fs'
@@ -41,6 +40,12 @@ function folders(dir: string): string[] {
   } catch {
     return []
   }
+}
+
+function failure(err: unknown): JournalError {
+  return err instanceof JournalError
+    ? err
+    : new JournalError('journal-failed', err instanceof Error ? err.message : String(err))
 }
 
 export function parseJournal(text: string): Line[] {
@@ -80,21 +85,25 @@ export class FileJournalStore implements JournalStore {
     chmodSync(path, 0o700)
   }
 
-  create(key: RunKey, definition: unknown): void {
-    this.ensureDir(this.root)
-    this.ensureDir(join(this.root, key.scope))
-    this.ensureDir(join(this.root, key.scope, key.graph))
+  async create(key: RunKey, definition: unknown): Promise<void> {
     const dir = this.dir(key)
-    this.ensureDir(dir)
-    writeFileSync(join(dir, GRAPH_FILE), `${JSON.stringify(definition)}\n`, {
-      mode: 0o600,
-      flag: 'wx',
-    })
-    writeFileSync(join(dir, JOURNAL_FILE), '', { mode: 0o600, flag: 'wx' })
+    try {
+      this.ensureDir(this.root)
+      this.ensureDir(join(this.root, key.scope))
+      this.ensureDir(join(this.root, key.scope, key.graph))
+      this.ensureDir(dir)
+      writeFileSync(join(dir, GRAPH_FILE), `${JSON.stringify(definition)}\n`, {
+        mode: 0o600,
+        flag: 'wx',
+      })
+      writeFileSync(join(dir, JOURNAL_FILE), '', { mode: 0o600, flag: 'wx' })
+    } catch (err) {
+      throw failure(err)
+    }
     this.sizes.set(dir, 0)
   }
 
-  append(key: RunKey, line: Line): void {
+  async append(key: RunKey, line: Line): Promise<void> {
     const dir = this.dir(key)
     const text = `${JSON.stringify(line)}\n`
     const bytes = Buffer.byteLength(text)
@@ -103,33 +112,39 @@ export class FileJournalStore implements JournalStore {
     const size = this.sizes.get(dir) ?? this.sizeOf(dir)
     if (size + bytes > JOURNAL_MAX_BYTES)
       throw new JournalError('journal-full', 'the journal is over 32 MiB')
-    let fd: number
     try {
-      fd = openSync(join(dir, JOURNAL_FILE), 'a', 0o600)
+      const fd = openSync(join(dir, JOURNAL_FILE), 'a', 0o600)
+      try {
+        writeSync(fd, text)
+        fsyncSync(fd)
+      } finally {
+        closeSync(fd)
+      }
     } catch (err) {
-      throw new JournalError('journal-failed', err instanceof Error ? err.message : String(err))
-    }
-    try {
-      writeSync(fd, text)
-      fsyncSync(fd)
-    } catch (err) {
-      throw new JournalError('journal-failed', err instanceof Error ? err.message : String(err))
-    } finally {
-      closeSync(fd)
+      throw failure(err)
     }
     this.sizes.set(dir, size + bytes)
     if (line.type === 'run-end') this.prune(key)
   }
 
   private sizeOf(dir: string): number {
+    const path = join(dir, JOURNAL_FILE)
+    let text: Buffer
     try {
-      return statSync(join(dir, JOURNAL_FILE)).size
+      text = readFileSync(path)
     } catch {
       return 0
     }
+    const whole = text.lastIndexOf(0x0a) + 1
+    if (whole < text.length) truncateSync(path, whole)
+    return whole
   }
 
-  read(key: RunKey): StoredRun | null {
+  async read(key: RunKey): Promise<StoredRun | null> {
+    return this.readNow(key)
+  }
+
+  private readNow(key: RunKey): StoredRun | null {
     const dir = this.dir(key)
     try {
       const definition = JSON.parse(readFileSync(join(dir, GRAPH_FILE), 'utf8')) as unknown
@@ -140,7 +155,11 @@ export class FileJournalStore implements JournalStore {
     }
   }
 
-  list(scope?: string): RunKey[] {
+  async list(scope?: string): Promise<RunKey[]> {
+    return this.listNow(scope)
+  }
+
+  private listNow(scope?: string): RunKey[] {
     const keys: RunKey[] = []
     for (const s of scope === undefined ? folders(this.root) : [scope]) {
       if (!SCOPE_PATTERN.test(s)) continue
@@ -153,30 +172,28 @@ export class FileJournalStore implements JournalStore {
     return keys.sort((a, b) => a.runId.localeCompare(b.runId))
   }
 
-  remove(key: RunKey): void {
-    rmSync(this.dir(key), { recursive: true, force: true })
+  async remove(key: RunKey): Promise<void> {
+    this.removeNow(key)
   }
 
-  private ended(key: RunKey): boolean {
-    const stored = this.read(key)
-    return stored?.lines.some((line) => line.type === 'run-end') ?? false
+  private removeNow(key: RunKey): void {
+    const dir = this.dir(key)
+    rmSync(dir, { recursive: true, force: true })
+    this.sizes.delete(dir)
   }
 
-  prune(key: Pick<RunKey, 'scope' | 'graph'>): void {
-    const runs = this.list(key.scope).filter((k) => k.graph === key.graph)
-    const finished = runs.filter((k) => this.ended(k))
+  private prune(key: Pick<RunKey, 'scope' | 'graph'>): void {
+    const runs = this.listNow(key.scope).filter((k) => k.graph === key.graph)
+    const finished: { key: RunKey; last: number }[] = []
+    for (const k of runs) {
+      const lines = this.readNow(k)?.lines ?? []
+      if (lines.some((l) => l.type === 'run-end'))
+        finished.push({ key: k, last: lines[lines.length - 1]?.t ?? 0 })
+    }
     const cutoff = this.now() - RUN_MAX_AGE_MS
-    const tooOld = finished.filter((k) => {
-      const stored = this.read(k)
-      const last = stored?.lines[stored.lines.length - 1]
-      return last !== undefined && last.t < cutoff
-    })
+    const tooOld = finished.filter((f) => f.last < cutoff).map((f) => f.key)
     const extra = finished.length - RUNS_KEPT
-    const oldest = extra > 0 ? finished.slice(0, extra) : []
-    for (const k of new Set([...tooOld, ...oldest])) this.remove(k)
-  }
-
-  exists(key: RunKey): boolean {
-    return existsSync(this.dir(key))
+    const oldest = extra > 0 ? finished.slice(0, extra).map((f) => f.key) : []
+    for (const k of new Set([...tooOld, ...oldest])) this.removeNow(k)
   }
 }

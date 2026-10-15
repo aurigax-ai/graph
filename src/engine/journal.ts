@@ -117,11 +117,11 @@ export interface StoredRun extends RunKey {
 }
 
 export interface JournalStore {
-  create: (key: RunKey, definition: unknown) => void
-  append: (key: RunKey, line: Line) => void
-  read: (key: RunKey) => StoredRun | null
-  list: (scope?: string) => RunKey[]
-  remove: (key: RunKey) => void
+  create: (key: RunKey, definition: unknown) => Promise<void>
+  append: (key: RunKey, line: Line) => Promise<void>
+  read: (key: RunKey) => Promise<StoredRun | null>
+  list: (scope?: string) => Promise<RunKey[]>
+  remove: (key: RunKey) => Promise<void>
 }
 
 export function stampLine(body: LineBody, seq: number, t: number): Line {
@@ -130,33 +130,44 @@ export function stampLine(body: LineBody, seq: number, t: number): Line {
 
 export class MemoryJournalStore implements JournalStore {
   private readonly runs = new Map<string, StoredRun>()
+  private readonly sizes = new Map<string, number>()
 
   private id(key: RunKey): string {
     return `${key.scope}/${key.graph}/${key.runId}`
   }
 
-  create(key: RunKey, definition: unknown): void {
-    this.runs.set(this.id(key), { ...key, definition, lines: [] })
+  async create(key: RunKey, definition: unknown): Promise<void> {
+    if (this.runs.has(this.id(key))) throw new JournalError('journal-failed', 'the run exists')
+    this.runs.set(this.id(key), { ...key, definition: structuredClone(definition), lines: [] })
   }
 
-  append(key: RunKey, line: Line): void {
+  async append(key: RunKey, line: Line): Promise<void> {
     const run = this.runs.get(this.id(key))
     if (!run) throw new JournalError('journal-failed', 'no such run')
-    run.lines.push(line)
+    const bytes = Buffer.byteLength(`${JSON.stringify(line)}\n`)
+    if (bytes > JOURNAL_LINE_MAX)
+      throw new JournalError('journal-full', 'a journal line is over 512 KiB')
+    const size = this.sizes.get(this.id(key)) ?? 0
+    if (size + bytes > JOURNAL_MAX_BYTES)
+      throw new JournalError('journal-full', 'the journal is over 32 MiB')
+    this.sizes.set(this.id(key), size + bytes)
+    run.lines.push(structuredClone(line))
   }
 
-  read(key: RunKey): StoredRun | null {
+  async read(key: RunKey): Promise<StoredRun | null> {
     const run = this.runs.get(this.id(key))
-    return run ? { ...run, lines: [...run.lines] } : null
+    return run ? structuredClone(run) : null
   }
 
-  list(scope?: string): RunKey[] {
+  async list(scope?: string): Promise<RunKey[]> {
     return [...this.runs.values()]
       .filter((r) => scope === undefined || r.scope === scope)
       .map(({ scope: s, graph, runId }) => ({ scope: s, graph, runId }))
+      .sort((a, b) => a.runId.localeCompare(b.runId))
   }
 
-  remove(key: RunKey): void {
+  async remove(key: RunKey): Promise<void> {
     this.runs.delete(this.id(key))
+    this.sizes.delete(this.id(key))
   }
 }
