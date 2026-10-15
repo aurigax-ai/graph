@@ -12,7 +12,16 @@
   "engines": {
     "node": ">=22"
   },
-  "files": ["dist", "src", "fixtures", "!src/**/*.test.ts", "!dist/**/*.test.*"],
+  "files": [
+    "dist",
+    "src",
+    "fixtures",
+    "docs",
+    "CONTRACT.md",
+    "SECURITY.md",
+    "!src/**/*.test.ts",
+    "!dist/**/*.test.*"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

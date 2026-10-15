@@ -32,6 +32,30 @@ runs. `run` keeps its runs under `.wire/runs` in the current folder (`--data <di
 The headless host runs `command`, `router`, `wait` and `notify` nodes; nodes that need an agent or
 a human are for a host that has them.
 
+## The Graph Runtime
+
+`wire runtime` is one long-running process per user, shown as `wire-runtime`, that clients reach
+over a Unix socket (JSON-RPC 2.0 with `Content-Length` framing; the methods, rights and errors are
+in [CONTRACT.md](CONTRACT.md)). Its data is in `$XDG_STATE_HOME/wire` (macOS
+`~/Library/Application Support/wire`) and its socket in `$XDG_RUNTIME_DIR/wire`; one runs per data
+folder.
+
+```sh
+wire runtime start            # runs while a client is open, then exits 60 s after the last one leaves
+wire runtime start --daemon   # keeps running with no client until it is stopped
+wire runtime status           # whether it runs, its pid, version and mode
+wire runtime stop             # lets started steps reach their next journal line, then exits
+wire runtime tokens revoke <client>
+```
+
+To keep it running across logins, install one of the documented files with the path of your
+`wire`: [docs/systemd/wire-runtime.service](docs/systemd/wire-runtime.service) into
+`~/.config/systemd/user/` (`systemctl --user enable --now wire-runtime`), or
+[docs/launchd/com.aurigax.wire-runtime.plist](docs/launchd/com.aurigax.wire-runtime.plist) into
+`~/Library/LaunchAgents/` (`launchctl load`). Both run `wire runtime start --daemon --foreground`
+and restart it when it fails. What the runtime trusts, and what it does not defend against, is in
+[SECURITY.md](SECURITY.md).
+
 ## A graph
 
 ```yaml
