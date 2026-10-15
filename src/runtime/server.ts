@@ -11,7 +11,12 @@ import {
 import type { Right, Tokens } from './tokens.ts'
 
 export const RUNTIME_CONTRACT = 1
-export const RUNTIME_EVENTS: readonly string[] = ['graph.changed', 'node.changed', 'run.changed']
+export const RUNTIME_EVENTS: readonly string[] = [
+  'graph.changed',
+  'node.changed',
+  'run.changed',
+  'worker.changed',
+]
 export const MAX_CLIENTS = 32
 export const MAX_UNAUTHENTICATED = 16
 export const HELLO_TIMEOUT_MS = 10_000
@@ -24,6 +29,7 @@ export interface Session {
   readonly client: string
   readonly rights: ReadonlySet<Right>
   notify: (event: string, params: unknown) => void
+  request: (method: string, params: unknown) => Promise<unknown>
   close: () => void
 }
 
@@ -147,6 +153,13 @@ export class RuntimeServer {
           closed: [],
           notify: (event, eventParams) => {
             void connection.sendNotification(event, eventParams).catch(() => {})
+          },
+          request: (method, requestParams) => {
+            if (socket.destroyed) return Promise.reject(new RpcError('connection-closed'))
+            const closed = new Promise<never>((_, reject) =>
+              socket.once('close', () => reject(new RpcError('connection-closed'))),
+            )
+            return Promise.race([connection.sendRequest(method, requestParams), closed])
           },
           close: () => socket.destroy(),
         }

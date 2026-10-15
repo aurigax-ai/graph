@@ -55,6 +55,13 @@ the runtime's scope (`dir:<real path>`), whichever client registered it. The CLI
 graph: that right belongs to a client that pairs with the runtime and asks its human, and a
 change to a graph outside `ui` disables it again.
 
+A host such as Ostia pairs with the runtime once (`pair.request`, then `pair.confirm` after its
+human said yes) and serves as a worker for the node kinds that need it: agents, approvals,
+notices, connectors, and commands in the folders it serves. `serveKinds` from
+`@aurigax-ai/wire` answers the runtime's `worker.task` requests with ordinary node kinds. A step
+whose kind has no worker connected waits as `pending` without its timeout running, and starts
+when a worker registers; a step whose worker goes away is reattached through the next one.
+
 To keep it running across logins, install one of the documented files after putting your own two
 paths in it, the Node it runs on (`command -v node`) and the package's `dist/cli/bin.js`
 (`node -p "require.resolve('@aurigax-ai/wire/package.json').replace('package.json', 'dist/cli/bin.js')"`

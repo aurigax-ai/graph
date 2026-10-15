@@ -302,10 +302,23 @@ export class Engine {
     return this.runs.get(runId)
   }
 
-  async deliver(event: Output): Promise<number> {
+  async deliver(event: Output, scope?: string): Promise<number> {
     let matched = 0
-    for (const run of this.active()) matched += await run.deliver(event)
+    for (const run of this.active(scope)) matched += await run.deliver(event)
     return matched
+  }
+
+  async rearm(scope: string, kinds: readonly string[]): Promise<void> {
+    const set = new Set(kinds)
+    for (const run of this.active(scope)) await run.rearmWaiting(set)
+  }
+
+  timed(): boolean {
+    return this.active().some((run) =>
+      [...run.state.active.values()].some(
+        (a) => a.phase === 'running' || a.phase === 'retrying' || a.wait?.on === 'timer',
+      ),
+    )
   }
 
   waitingOn(event: Output): { run: GraphRun; node: string }[] {

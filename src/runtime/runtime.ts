@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import type { Clock } from '../engine/contract.ts'
 import { acquireLock } from './lock.ts'
 import { PathRefusal, type RuntimePaths, ensurePrivateDir, runtimePaths } from './paths.ts'
 import { RuntimeRuns } from './runs.ts'
@@ -22,6 +23,7 @@ export interface RuntimeOptions {
   daemon?: boolean
   idleMs?: number
   drainMs?: number
+  clock?: Clock
 }
 
 export type StartOutcome =
@@ -136,7 +138,7 @@ export async function startRuntime(opts: RuntimeOptions = {}): Promise<StartOutc
   let runtime: Runtime
   try {
     runtime = new Runtime(paths, lock.release, opts)
-    const runs = new RuntimeRuns(runtime)
+    const runs = new RuntimeRuns(runtime, opts.clock)
     runtime.add(runs)
     await runs.recover()
     await runtime.server.listen(paths.socket)

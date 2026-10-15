@@ -1,5 +1,6 @@
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -361,12 +362,17 @@ describe('the runtime registry and runs', () => {
     expect((await states())[0]).toBe('g:changed')
   })
 
-  it('GRF-C229 only a worker sets or clears the sandboxed flag, it survives a restart, and a sandboxed folder refuses to enable or start a graph with a command', async () => {
+  it('GRF-C229 only a worker sets or clears the sandboxed flag, it survives a restart, and a command in a sandboxed folder waits pending instead of running headless', async () => {
     const { env, paths } = runtimePlace()
     const runtime = await started(paths)
-    const folder = folderWith({ slow: SLOW, g: ROUTER })
+    const folder = folderWith({ g: ROUTER })
+    const mark = join(folder, 'ran')
+    writeFileSync(
+      join(folder, 'graphs', 'touch.yaml'),
+      graph(`  - { id: a, kind: command, with: { run: [touch, ${JSON.stringify(mark)}] } }`),
+    )
     const c = await host(runtime)
-    const scope = await enabled(c, folder, ['slow', 'g'])
+    const scope = await enabled(c, folder, ['touch', 'g'])
     const cli = await track(cliClient(paths))
     expect(await cli.call('scopes.register', { folder, sandboxed: true })).toMatchObject({
       sandboxed: false,
@@ -377,30 +383,22 @@ describe('the runtime registry and runs', () => {
     expect(await cli.call('scopes.register', { folder, sandboxed: false })).toMatchObject({
       sandboxed: true,
     })
-    await expect(c.call('runs.start', { scope, name: 'slow', by: 'human' })).rejects.toThrow(
-      'sandboxed',
-    )
     await runtime.stop()
     runtimes.splice(runtimes.indexOf(runtime), 1)
     const later = await started(paths)
     const again = await track(pairedClient(later, 'host', RIGHTS))
-    const refused = await output(wire(env, ['start', 'slow'], folder))
-    expect(JSON.parse(refused.stdout)).toMatchObject({ ok: false, error: 'sandboxed' })
     expect(await again.call('scopes.register', { folder })).toMatchObject({ sandboxed: true })
-    const listing = await again.call<{ name: string; fingerprint: string }[]>('graphs.list', {
-      scope,
-    })
-    await again.call('graphs.disable', { scope, name: 'slow' })
-    await expect(
-      again.call('graphs.enable', {
+    const start = await output(wire(env, ['start', 'touch'], folder))
+    const { runId } = JSON.parse(start.stdout) as { runId: string }
+    await until(async () => {
+      const run = await again.call<{ nodes: { node: string; status: string }[] }>('runs.show', {
         scope,
-        name: 'slow',
-        fingerprint: listing.find((g) => g.name === 'slow')?.fingerprint,
-      }),
-    ).rejects.toThrow('sandboxed')
-    expect(JSON.parse((await output(wire(env, ['start', 'g'], folder))).stdout)).toHaveProperty(
-      'runId',
-    )
+        runId,
+      })
+      return run.nodes.some((n) => n.node === 'a' && n.status === 'pending')
+    })
+    await new Promise((r) => setTimeout(r, 300))
+    expect(existsSync(mark)).toBe(false)
     expect(await again.call('scopes.register', { folder, sandboxed: false })).toMatchObject({
       sandboxed: false,
     })

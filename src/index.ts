@@ -23,6 +23,8 @@ export {
   type Notice,
   type Output,
   type Reattached,
+  type StartedRecord,
+  type WorkerWait,
 } from './engine/contract.ts'
 export { dryRun, parseMocks } from './engine/dryRun.ts'
 export {
@@ -111,3 +113,15 @@ export {
   parseUse,
 } from './connectors/contract.ts'
 export { HTTP_RESPONSE_MAX, HTTP_TIMEOUT_MS, httpConnector, requestUrl } from './connectors/http.ts'
+export {
+  type ClientOptions,
+  type Hello,
+  RuntimeCallError,
+  RuntimeClient,
+  connectOrStart,
+} from './runtime/client.ts'
+export { type RuntimePaths, runtimePaths } from './runtime/paths.ts'
+export { RUNTIME_CONTRACT, RUNTIME_EVENTS } from './runtime/server.ts'
+export { CLI_RIGHTS, RIGHTS, type Right, readCliToken } from './runtime/tokens.ts'
+export { type WorkerTask, serveKinds } from './runtime/workerClient.ts'
+export { WORKER_KINDS } from './runtime/workers.ts'

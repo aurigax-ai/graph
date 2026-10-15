@@ -98,6 +98,10 @@ export class RuntimeClient {
     this.connection.onNotification(event, handler)
   }
 
+  handle(method: string, handler: (params: unknown) => unknown | Promise<unknown>): void {
+    this.connection.onRequest(method, handler)
+  }
+
   close(): void {
     this.connection.dispose()
     this.socket.destroy()

@@ -4,19 +4,22 @@ import type { Clock, Host, Notice, Output } from '../engine/contract.ts'
 import { Engine, missingKinds } from '../engine/engine.ts'
 import { FileJournalStore } from '../engine/fileStore.ts'
 import { manualInputKeys, parseInputs } from '../engine/inputs.ts'
+import { WORKER_READY } from '../engine/interpreter.ts'
 import type { Line, RunKey } from '../engine/journal.ts'
 import { isEnded } from '../engine/runState.ts'
 import { type RunSummary, runView } from '../engine/summary.ts'
 import { type GraphFile, isRecord, triggerKind } from '../format/model.ts'
+import { descriptorOf } from '../kinds/catalog.ts'
 import { commandNode } from '../kinds/command.ts'
 import { routerNode, waitNode } from '../kinds/smallKinds.ts'
+import { Pairing } from './pairing.ts'
 import { type Listing, Registry, type Scope } from './registry.ts'
 import type { Part, Runtime } from './runtime.ts'
 import { RpcError, type Session } from './server.ts'
+import { WORKER_KINDS, WorkerPool, workerKind } from './workers.ts'
 
 export const RUNS_FOLDER = 'runs'
 export const RUNTIME_TRIGGERS = ['manual']
-const HEADLESS_KINDS = new Set(['command'])
 const CONTROL_ACTIONS = ['pause', 'resume', 'cancel', 'retry', 'rerun', 'skip', 'continue'] as const
 type ControlAction = (typeof CONTROL_ACTIONS)[number]
 
@@ -54,6 +57,8 @@ export function listingView(listing: Listing): Record<string, unknown> {
 export class RuntimeRuns implements Part {
   readonly registry: Registry
   readonly engine: Engine
+  readonly workers: WorkerPool
+  private readonly pairing: Pairing
   private readonly owned = new Map<number, Set<string>>()
   private readonly groups = new Set<number>()
 
@@ -62,24 +67,37 @@ export class RuntimeRuns implements Part {
     clock: Clock = realClock,
   ) {
     this.registry = new Registry(runtime.paths.data, () => clock.now())
+    this.pairing = new Pairing(runtime.tokens, () => clock.now())
+    this.workers = new WorkerPool(this.registry, (scopes, kinds) =>
+      this.workersChanged(scopes, kinds),
+    )
+    const headless = commandNode((req) => {
+      const scope = this.registry.byKey(req.scope)
+      if (!scope || scope.sandboxed)
+        return Promise.resolve({
+          exitCode: -1,
+          stdout: '',
+          stderr: 'no folder for this command',
+          timedOut: false,
+          truncated: false,
+        })
+      return runProcess(scope.folder, process.env, this.groups)(req)
+    })
+    const sandboxed = (key: string) => this.registry.byKey(key)?.sandboxed === true
     const host: Host = {
       name: 'wire-runtime',
       contract: 1,
       kinds: [
-        commandNode((req) => {
-          const scope = this.registry.byKey(req.scope)
-          if (!scope || scope.sandboxed)
-            return Promise.resolve({
-              exitCode: -1,
-              stdout: '',
-              stderr: 'no folder for this command',
-              timedOut: false,
-              truncated: false,
-            })
-          return runProcess(scope.folder, process.env, this.groups)(req)
-        }),
         routerNode,
         waitNode(() => clock.now()),
+        ...WORKER_KINDS.map((kind) =>
+          workerKind({
+            descriptor: descriptorOf(kind) as NonNullable<ReturnType<typeof descriptorOf>>,
+            pool: this.workers,
+            sandboxed,
+            ...(kind === 'command' ? { headless } : {}),
+          }),
+        ),
       ],
       triggers: RUNTIME_TRIGGERS,
       clock,
@@ -94,7 +112,16 @@ export class RuntimeRuns implements Part {
   }
 
   busy(): boolean {
-    return this.engine.active().length > 0
+    return this.engine.timed()
+  }
+
+  private workersChanged(scopes: string[], kinds: string[]): void {
+    this.runtime.server.broadcast('worker.changed', { workers: this.workers.list() })
+    for (const scope of scopes) {
+      if (kinds.length > 0) void this.engine.rearm(scope, kinds).catch(() => {})
+      for (const kind of kinds)
+        void this.engine.deliver({ type: WORKER_READY, kind, scope }, scope).catch(() => {})
+    }
   }
 
   async drain(deadline: number): Promise<void> {
@@ -208,7 +235,7 @@ export class RuntimeRuns implements Part {
       const p = params(raw)
       const scope = this.registry.scope(p.scope)
       const listing = this.registry.listing(scope, String(p.name))
-      const problem = this.problem(scope, listing)
+      const problem = this.problem(listing)
       if (problem) throw new RpcError(problem)
       this.registry.enable(listing, p.fingerprint)
       const now = this.registry.listing(scope, listing.name)
@@ -235,17 +262,39 @@ export class RuntimeRuns implements Part {
       if (!key) throw new RpcError('unknown-run')
       return this.view(scope, key, typeof p.node === 'string' ? p.node : undefined)
     })
+    server.method('worker.register', 'worker', (raw, session) => {
+      const p = params(raw)
+      if (!Array.isArray(p.scopes)) throw new RpcError('bad-scopes')
+      const keys = p.scopes.map((id) => this.ownScope(session, id).key)
+      const answer = this.workers.register(session, p.kinds, keys)
+      this.runtime.server.onClose(session, () => this.workers.drop(session))
+      return answer
+    })
+    server.method('events.push', 'ingest', async (raw, session) => {
+      const p = params(raw)
+      const scope = this.ownScope(session, p.scope)
+      const event = p.event
+      if (!isRecord(event) || typeof event.type !== 'string') throw new RpcError('bad-event')
+      if (event.type === WORKER_READY) throw new RpcError('reserved-event')
+      return { matched: await this.engine.deliver(event as Output, scope.key) }
+    })
+    server.method('pair.request', 'observe', (raw, session) => {
+      const p = params(raw)
+      this.runtime.server.onClose(session, () => this.pairing.forget(session.id))
+      return this.pairing.request(session.id, p.client, p.rights)
+    })
+    server.method('pair.confirm', 'observe', (raw, session) =>
+      this.pairing.confirm(session.id, params(raw).id),
+    )
     server.method('runs.start', 'start', (raw, session) => this.start(params(raw), session))
     server.method('runs.control', 'control', (raw) => this.control(params(raw)))
   }
 
-  private problem(scope: Scope, listing: Listing): string | null {
+  private problem(listing: Listing): string | null {
     if (!listing.loaded)
       return `invalid: ${listing.problems[0]?.message ?? 'the file does not load'}`
     const missing = missingKinds(listing.loaded.graph, this.engine.host)
     if (missing[0]) return `${missing[0].code}: ${missing[0].message}`
-    if (scope.sandboxed && listing.loaded.graph.nodes.some((n) => HEADLESS_KINDS.has(n.kind)))
-      return 'sandboxed: a command in a sandboxed folder runs only through its host'
     return null
   }
 
@@ -272,7 +321,7 @@ export class RuntimeRuns implements Part {
       throw new RpcError(
         `not-for-agents: ${listing.name} does not let agents start it (its manual trigger has no agents: true)`,
       )
-    const problem = this.problem(scope, listing)
+    const problem = this.problem(listing)
     if (problem) throw new RpcError(problem)
     const pairs = Array.isArray(p.inputs) ? p.inputs.filter((x) => typeof x === 'string') : []
     const input = parseInputs(

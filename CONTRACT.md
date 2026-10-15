@@ -60,6 +60,10 @@ error has JSON-RPC code -32000.
 | `runs.show` | `observe` | `{ scope, runId, node? }` | a run, node by node |
 | `runs.start` | `start` | `{ scope, name, input?, inputs?, by? }` | `{ runId }` or `{ queued: true }` |
 | `runs.control` | `control` | `{ scope, runId, action, node? }` | `{ ok }` |
+| `worker.register` | `worker` | `{ kinds, scopes }` | `{ kinds }` |
+| `events.push` | `ingest` | `{ scope, event }` | `{ matched }` |
+| `pair.request` | `observe` | `{ client, rights }` | `{ id, expiresAt }` |
+| `pair.confirm` | `observe` | `{ id }` | `{ token, client, rights }` |
 
 A scope is a real folder, `dir:<real path>`, the same for every client. `scopes.register` resolves
 the folder and refuses a scratch one (`scratch`); only a client with `worker` sets or clears its
@@ -76,7 +80,36 @@ agent's and needs `agents: true` on the trigger (`not-for-agents`). `input` is a
 a list of `key=value`. `action` is `pause`, `resume`, `cancel`, `retry`, or `rerun`, `skip` and
 `continue` for an interrupted `node`.
 
-`mode` is `client` (the runtime exits 60 s after its last client leaves while no run is active
+## Workers
+
+A worker runs the node kinds the runtime does not run itself: `agent`, `approval`, `notify`,
+`connector`, and `command` in a folder it serves. `worker.register` names the kinds and the scopes
+(registered on the same connection) it serves; at most 8 workers serve one folder. The runtime
+runs `router`, `wait`, and `command` headless only in a folder no worker serves and that is not
+sandboxed. A `connector` step in a sandboxed folder fails `ConnectorFailed`.
+
+The runtime sends each step to a worker as a request, `worker.task`:
+
+`{ op, kind, scope, folder, run, node, trigger, timeoutMs, history, input?, wait?, started?, event? }`
+
+with `op` one of `start`, `resume` (an event for its wait), `reattach` (after the runtime or the
+worker went away), `cancel` and `rearm`. The worker answers `{ done }`, `{ waiting, started? }`,
+`{ lost: true }` (reattach only: the work is gone), `{ error: { name, message } }`, or `{ ok }` for
+`cancel` and `rearm`. With no worker for its kind and folder, a step waits as pending
+(`{ on: "worker" }`, shown as `pending`) and its timeout does not run; when a worker registers it
+starts once and its timeout starts then. When a worker goes away during a step, the step is
+reattached through the next worker instead of started again.
+
+`events.push` delivers an event (`{ type, ... }`, such as an agent's stop or an answer) to the
+waiting steps of one of the client's scopes; `worker-ready` is the runtime's own.
+
+## Pairing
+
+A client that needs rights beyond the CLI's asks with `pair.request` and, after its own human said
+yes, confirms on the same connection with `pair.confirm` within 2 minutes. The token is returned
+once. A pairing confirmed from another connection, late or twice issues nothing.
+
+`mode` is `client` (the runtime exits 60 s after its last client leaves while no step is running
 or waiting on a timer) or `daemon` (started with `--daemon`; it runs until `wire runtime stop`).
 
 ## Events
@@ -88,3 +121,4 @@ The runtime sends events as notifications to every client holding their right.
 | `graph.changed` | `observe` | `{ scope, name, state?, notice?: { title, body? }, runId? }` |
 | `node.changed` | `observe` | `{ scope, runId, node, type }` |
 | `run.changed` | `observe` | `{ scope, runId, graph, status }` |
+| `worker.changed` | `observe` | `{ workers: [{ client, kinds, scopes }] }` |

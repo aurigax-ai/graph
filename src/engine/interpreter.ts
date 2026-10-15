@@ -39,6 +39,7 @@ import {
 } from './runState.ts'
 
 export const STATE_LINE_EVERY = 25
+export const WORKER_READY = 'worker-ready'
 export const INTERRUPTED_PROMPT = 'You were interrupted. Finish the task and report.'
 export const NOTIFIED_ENDS: readonly RunStatus[] = [
   'step-limit',
@@ -76,6 +77,7 @@ interface Live {
   gen: number
   abort: AbortController
   cancels: (() => void)[]
+  timeout?: () => void
 }
 
 export function reportParagraph(result: Record<string, unknown>, runId: string): string {
@@ -94,6 +96,8 @@ function errorParts(err: unknown): { name: string; message: string } {
 
 function waitMatches(wait: NodeWait, event: Output): boolean {
   if (wait.on === 'timer') return false
+  if (wait.on === 'worker')
+    return event.type === WORKER_READY && event.kind === wait.kind && event.scope === wait.scope
   const match = wait.on === 'event' ? wait.match : { type: 'answer', key: wait.ask.key }
   return Object.entries(match).every(([k, v]) => event[k] === v)
 }
@@ -183,6 +187,7 @@ export class GraphRun {
       timeoutMs: this.timeoutOf(id),
       trigger: this.state.trigger,
       started: (nodeId: string) => this.state.history.get(nodeId) ?? null,
+      history: () => [...this.state.history.values()],
       node: this.node(id),
     }
   }
@@ -217,21 +222,27 @@ export class GraphRun {
     return this.live.get(id)?.gen === gen && this.state.active.has(id)
   }
 
-  private timer(id: string, gen: number, at: number, fn: () => void | Promise<void>): void {
+  private timer(
+    id: string,
+    gen: number,
+    at: number,
+    fn: () => void | Promise<void>,
+  ): (() => void) | undefined {
     const live = this.live.get(id)
-    if (!live) return
-    live.cancels.push(
-      this.deps.host.clock.setTimer(at, () => {
-        void this.serial(() => (this.current(id, gen) ? fn() : undefined))
-      }),
-    )
+    if (!live) return undefined
+    const cancel = this.deps.host.clock.setTimer(at, () => {
+      void this.serial(() => (this.current(id, gen) ? fn() : undefined))
+    })
+    live.cancels.push(cancel)
+    return cancel
   }
 
-  private armTimeout(id: string, active: ActiveNode): void {
+  private armTimeout(id: string, active: ActiveNode, from = active.startedAt): void {
     const ms = this.timeoutOf(id)
     if (ms === null) return
     const live = this.liveOf(id)
-    this.timer(id, live.gen, active.startedAt + ms, () =>
+    live.timeout?.()
+    live.timeout = this.timer(id, live.gen, from + ms, () =>
       this.nodeError(
         id,
         live.gen,
@@ -389,6 +400,7 @@ export class GraphRun {
       wait: res.waiting,
       ...(res.started ? { started: res.started } : {}),
     })
+    if (res.waiting.on === 'worker') this.live.get(id)?.timeout?.()
     this.armWait(id, gen, res.waiting)
   }
 
@@ -413,6 +425,7 @@ export class GraphRun {
         if (!resume) continue
         matched += 1
         const wait = active.wait
+        if (wait.on === 'worker') this.armTimeout(id, active, this.deps.host.clock.now())
         this.call(id, live, () => resume(wait, event, this.context(id, active, live.abort.signal)))
       }
     }).then(() => matched)
@@ -774,6 +787,20 @@ export class GraphRun {
     }).then(() => done)
   }
 
+  rearmWaiting(kinds: ReadonlySet<string>): Promise<void> {
+    return this.serial(async () => {
+      for (const [id, active] of [...this.state.active]) {
+        const wait = active.wait
+        if (active.phase !== 'waiting' || !wait || wait.on === 'worker') continue
+        if (!kinds.has(this.node(id).kind)) continue
+        const live = this.liveOf(id)
+        await this.kind(id)
+          .impl.rearm?.(wait, active.started, this.context(id, active, live.abort.signal))
+          .catch(() => {})
+      }
+    })
+  }
+
   recover(): Promise<void> {
     return this.serial(async () => {
       if (isEnded(this.state.status)) return
@@ -804,10 +831,12 @@ export class GraphRun {
     await this.record({
       type: 'reattach',
       node: id,
-      verdict: typeof verdict === 'string' ? verdict : 'done',
+      verdict: typeof verdict === 'string' ? verdict : 'done' in verdict ? 'done' : 'running',
     })
+    if (typeof verdict === 'object' && 'waiting' in verdict)
+      return this.onResult(id, live.gen, verdict)
     if (verdict === 'running') {
-      this.armTimeout(id, active)
+      if (active.wait?.on !== 'worker') this.armTimeout(id, active)
       if (active.wait) {
         this.armWait(id, live.gen, active.wait)
         await bound.impl.rearm?.(active.wait, active.started, ctx).catch(() => {})
