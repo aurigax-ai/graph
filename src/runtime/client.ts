@@ -85,9 +85,11 @@ export class RuntimeClient {
   }
 
   async call<T = unknown>(method: string, params: unknown = {}): Promise<T> {
+    if (this.socket.destroyed) throw new RuntimeCallError('connection-closed')
     try {
       return (await untilClosed(this.closed, this.connection.sendRequest(method, params))) as T
     } catch (err) {
+      if (this.socket.destroyed) throw new RuntimeCallError('connection-closed')
       throw callError(err)
     }
   }

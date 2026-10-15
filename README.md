@@ -48,8 +48,11 @@ wire runtime stop             # lets started steps reach their next journal line
 wire runtime tokens revoke <client>
 ```
 
-To keep it running across logins, install one of the documented files with the path of your
-`wire`: [docs/systemd/wire-runtime.service](docs/systemd/wire-runtime.service) into
+To keep it running across logins, install one of the documented files after putting your own two
+paths in it, the Node it runs on (`command -v node`) and the package's `dist/cli/bin.js`
+(`node -p "require.resolve('@aurigax-ai/wire/package.json').replace('package.json', 'dist/cli/bin.js')"`
+from where it is installed); a version manager's shim is not enough, since a service has no shell:
+[docs/systemd/wire-runtime.service](docs/systemd/wire-runtime.service) into
 `~/.config/systemd/user/` (`systemctl --user enable --now wire-runtime`), or
 [docs/launchd/com.aurigax.wire-runtime.plist](docs/launchd/com.aurigax.wire-runtime.plist) into
 `~/Library/LaunchAgents/` (`launchctl load`). Both run `wire runtime start --daemon --foreground`

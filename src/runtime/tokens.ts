@@ -71,12 +71,7 @@ export class Tokens {
   }
 
   ensureCliToken(): void {
-    if (this.records.some((r) => r.client === CLI_CLIENT)) {
-      try {
-        readFileSync(cliTokenPath(this.data), 'utf8')
-        return
-      } catch {}
-    }
+    if (this.verify(readCliToken(this.data))?.client === CLI_CLIENT) return
     const token = this.issue(CLI_CLIENT, CLI_RIGHTS)
     ensurePrivateDir(join(this.data, 'tokens'))
     const path = cliTokenPath(this.data)

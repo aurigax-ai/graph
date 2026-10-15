@@ -3,7 +3,7 @@ Description=Wire Graph Runtime (wire-runtime)
 
 [Service]
 Type=simple
-ExecStart=%h/.local/share/pnpm/wire runtime start --daemon --foreground
+ExecStart=/usr/bin/node /usr/lib/node_modules/@aurigax-ai/wire/dist/cli/bin.js runtime start --daemon --foreground
 Restart=on-failure
 RestartSec=5
 

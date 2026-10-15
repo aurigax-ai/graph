@@ -25,7 +25,7 @@ export interface RuntimeOptions {
 
 export type StartOutcome =
   | { ok: true; runtime: Runtime }
-  | { ok: false; error: 'already-running'; pid: number }
+  | { ok: false; error: 'already-running'; pid: number | null }
   | { ok: false; error: 'unsafe-folder'; message: string }
 
 export interface Part {
@@ -93,6 +93,7 @@ export class Runtime {
 
   reloadTokens(): void {
     this.tokens.reload()
+    this.tokens.ensureCliToken()
     this.server.dropRevoked()
   }
 
@@ -101,8 +102,16 @@ export class Runtime {
     if (this.idleTimer) clearTimeout(this.idleTimer)
     this.stopping = (async () => {
       this.server.stopAccepting()
-      const deadline = Date.now() + (this.opts.drainMs ?? DRAIN_MS)
-      await Promise.all(this.parts.map((p) => p.drain?.(deadline)))
+      const drainMs = this.opts.drainMs ?? DRAIN_MS
+      const deadline = Date.now() + drainMs
+      let timer: NodeJS.Timeout | undefined
+      await Promise.race([
+        Promise.all(this.parts.map((p) => p.drain?.(deadline))),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, drainMs)
+        }),
+      ])
+      clearTimeout(timer)
       await this.server.close(this.paths.socket)
       this.release()
       this.finish()
@@ -121,7 +130,7 @@ export async function startRuntime(opts: RuntimeOptions = {}): Promise<StartOutc
       return { ok: false, error: 'unsafe-folder', message: err.message }
     throw err
   }
-  const lock = acquireLock(paths.data)
+  const lock = await acquireLock(paths.data)
   if (!lock.ok) return { ok: false, error: 'already-running', pid: lock.pid }
   let runtime: Runtime
   try {

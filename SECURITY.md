@@ -12,6 +12,10 @@ Credentials do not belong in the runtime. A host keeps connection secrets and th
 (enabling a graph, answering an approval) and sends the runtime neither a secret nor a token of its
 own; a step's input and output carry none.
 
+On Linux the lock that keeps one runtime per data folder is an abstract Unix socket, which has no
+permissions of its own; its name comes from `lock-id`, a random value in the private data folder,
+so another user cannot take it first.
+
 ## The known gap
 
 The runtime does not defend against another process of the same user that reads or writes its data

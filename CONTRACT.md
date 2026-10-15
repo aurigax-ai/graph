@@ -17,7 +17,10 @@ a runtime refuses a client that speaks another number with `unsupported-contract
 
 Both folders are 0700 and owned by the user; the runtime refuses a folder that is a link or
 another user's. The socket and every file in the data folder are 0600. One runtime runs per data
-folder (`runtime.lock`); a second start exits with `already-running` and the first one's pid.
+folder: the lock is held by the kernel and ends with the process (on Linux an abstract socket named
+from the data folder's private `lock-id`, on macOS an exclusive lock on `runtime.lock`), and
+`runtime.lock` names the holder's pid. A second start exits with `already-running` and that pid.
+Clients find the runtime's pid by asking it (`runtime.status`), never from the file.
 
 ## Tokens and rights
 

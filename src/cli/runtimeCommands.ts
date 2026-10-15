@@ -3,7 +3,7 @@ import { closeSync, openSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { RuntimeClient, START_WAIT_MS, connectOrStart } from '../runtime/client.ts'
-import { alive, lockHolder } from '../runtime/lock.ts'
+import { lockHeld, recordedPid } from '../runtime/lock.ts'
 import { type RuntimePaths, ensurePrivateDir, runtimePaths } from '../runtime/paths.ts'
 import { PROCESS_TITLE, startRuntime } from '../runtime/runtime.ts'
 import { Tokens, readCliToken } from '../runtime/tokens.ts'
@@ -25,6 +25,10 @@ export function binPath(): string {
   return join(here, '..', `bin${extname(here)}`)
 }
 
+export function runtimeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !name.startsWith('OSTIA_')))
+}
+
 export function spawnRuntime(paths: RuntimePaths, daemon: boolean): void {
   ensurePrivateDir(paths.data)
   const log = openSync(join(paths.data, 'runtime.log'), 'a', 0o600)
@@ -32,7 +36,7 @@ export function spawnRuntime(paths: RuntimePaths, daemon: boolean): void {
     const child = spawn(
       process.execPath,
       [binPath(), 'runtime', 'start', '--foreground', ...(daemon ? ['--daemon'] : [])],
-      { detached: true, stdio: ['ignore', log, log], env: process.env },
+      { detached: true, stdio: ['ignore', log, log], env: runtimeEnv(process.env) },
     )
     child.unref()
   } finally {
@@ -46,6 +50,28 @@ export function cliConnect(paths: RuntimePaths = runtimePaths()): Promise<Runtim
     () => spawnRuntime(paths, false),
     START_WAIT_MS,
   )
+}
+
+interface Status {
+  pid: number
+  mode: keyof typeof MODE_NOTES
+  [key: string]: unknown
+}
+
+async function probe(paths: RuntimePaths): Promise<Status | null> {
+  try {
+    const client = await RuntimeClient.connect({
+      socket: paths.socket,
+      token: readCliToken(paths.data) ?? '',
+    })
+    try {
+      return await client.call<Status>('runtime.status')
+    } finally {
+      client.close()
+    }
+  } catch {
+    return null
+  }
 }
 
 async function foreground(daemon: boolean): Promise<CommandOutput> {
@@ -64,61 +90,53 @@ async function foreground(daemon: boolean): Promise<CommandOutput> {
 
 async function start(daemon: boolean): Promise<CommandOutput> {
   const paths = runtimePaths()
-  const holder = lockHolder(paths.data)
-  if (holder !== null) return json({ ok: false, error: 'already-running', pid: holder }, 1)
+  const running = await probe(paths)
+  if (running) return json({ ok: false, error: 'already-running', pid: running.pid }, 1)
+  if (await lockHeld(paths.data))
+    return json({ ok: false, error: 'already-running', pid: recordedPid(paths.data) }, 1)
   spawnRuntime(paths, daemon)
   const deadline = Date.now() + START_WAIT_MS
   for (;;) {
     await new Promise((r) => setTimeout(r, 50))
-    try {
-      const client = await RuntimeClient.connect({
-        socket: paths.socket,
-        token: readCliToken(paths.data) ?? '',
-      })
-      const { pid, mode } = client.hello
-      client.close()
-      return json({ ok: true, pid, mode })
-    } catch (err) {
-      if (Date.now() > deadline)
-        return json({ ok: false, error: 'not-started', message: String(err) }, 1)
-    }
+    const started = await probe(paths)
+    if (started) return json({ ok: true, pid: started.pid, mode: started.mode })
+    if (Date.now() > deadline) return json({ ok: false, error: 'not-started' }, 1)
   }
 }
 
 async function stop(): Promise<CommandOutput> {
   const paths = runtimePaths()
-  const pid = lockHolder(paths.data)
-  if (pid === null) return json({ ok: true, running: false })
-  process.kill(pid, 'SIGTERM')
+  const running = await probe(paths)
+  if (!running) {
+    if (await lockHeld(paths.data))
+      return json({ ok: false, error: 'not-answering', pid: recordedPid(paths.data) }, 1)
+    return json({ ok: true, running: false })
+  }
+  process.kill(running.pid, 'SIGTERM')
   const deadline = Date.now() + STOP_WAIT_MS
-  while (alive(pid) && lockHolder(paths.data) === pid) {
-    if (Date.now() > deadline) return json({ ok: false, error: 'still-running', pid }, 1)
+  while (await lockHeld(paths.data)) {
+    if (Date.now() > deadline)
+      return json({ ok: false, error: 'still-running', pid: running.pid }, 1)
     await new Promise((r) => setTimeout(r, 50))
   }
-  return json({ ok: true, stopped: pid })
+  return json({ ok: true, stopped: running.pid })
 }
 
 async function status(): Promise<CommandOutput> {
   const paths = runtimePaths()
-  if (lockHolder(paths.data) === null) return json({ running: false })
-  const client = await RuntimeClient.connect({
-    socket: paths.socket,
-    token: readCliToken(paths.data) ?? '',
-  })
-  try {
-    const info = await client.call<{ mode: keyof typeof MODE_NOTES }>('runtime.status')
-    return json({ running: true, ...info, note: MODE_NOTES[info.mode] })
-  } finally {
-    client.close()
-  }
+  const running = await probe(paths)
+  if (running) return json({ running: true, ...running, note: MODE_NOTES[running.mode] })
+  if (await lockHeld(paths.data))
+    return json({ running: true, error: 'not-answering', pid: recordedPid(paths.data) }, 1)
+  return json({ running: false })
 }
 
-function revoke(client: string | undefined): CommandOutput {
+async function revoke(client: string | undefined): Promise<CommandOutput> {
   if (!client) return json({ ok: false, error: 'usage' }, 2)
   const paths = runtimePaths()
+  const running = await probe(paths)
   const revoked = new Tokens(paths.data).revoke(client)
-  const pid = lockHolder(paths.data)
-  if (revoked && pid !== null) process.kill(pid, 'SIGHUP')
+  if (revoked && running) process.kill(running.pid, 'SIGHUP')
   return json(
     { ok: revoked, ...(revoked ? { revoked: client } : { error: 'unknown-client' }) },
     revoked ? 0 : 1,

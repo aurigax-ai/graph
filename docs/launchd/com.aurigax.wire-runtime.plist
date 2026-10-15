@@ -6,7 +6,8 @@
   <string>com.aurigax.wire-runtime</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/USERNAME/Library/pnpm/wire</string>
+    <string>/opt/homebrew/bin/node</string>
+    <string>/opt/homebrew/lib/node_modules/@aurigax-ai/wire/dist/cli/bin.js</string>
     <string>runtime</string>
     <string>start</string>
     <string>--daemon</string>

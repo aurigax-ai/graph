@@ -1,70 +1,111 @@
-import { linkSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import {
+  constants,
+  closeSync,
+  ftruncateSync,
+  linkSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  writeSync,
+} from 'node:fs'
+import { createServer } from 'node:net'
 import { join } from 'node:path'
 
 export const LOCK_FILE = 'runtime.lock'
+export const LOCK_ID_FILE = 'lock-id'
+const DARWIN_O_EXLOCK = 0x20
 
-export type LockResult = { ok: true; release: () => void } | { ok: false; pid: number }
+export type LockResult = { ok: true; release: () => void } | { ok: false; pid: number | null }
 
-export function alive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false
+function lockId(data: string): string {
+  const path = join(data, LOCK_ID_FILE)
   try {
-    process.kill(pid, 0)
-    return true
+    const id = readFileSync(path, 'utf8').trim()
+    if (/^[0-9a-f]{32}$/.test(id)) return id
+  } catch {}
+  const staged = `${path}.${process.pid}`
+  writeFileSync(staged, `${randomBytes(16).toString('hex')}\n`, { mode: 0o600 })
+  try {
+    linkSync(staged, path)
   } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'EPERM'
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+  } finally {
+    rmSync(staged, { force: true })
   }
+  return readFileSync(path, 'utf8').trim()
 }
 
-export function lockHolder(data: string): number | null {
+export function recordedPid(data: string): number | null {
   try {
     const pid = Number(readFileSync(join(data, LOCK_FILE), 'utf8').trim())
-    return alive(pid) ? pid : null
+    return Number.isInteger(pid) && pid > 0 ? pid : null
   } catch {
     return null
   }
 }
 
-export function acquireLock(data: string, pid = process.pid): LockResult {
-  const path = join(data, LOCK_FILE)
-  const staged = join(data, `${LOCK_FILE}.${pid}`)
-  writeFileSync(staged, `${pid}\n`, { mode: 0o600 })
+function busy(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException).code
+  return code === 'EADDRINUSE' || code === 'EAGAIN' || code === 'EWOULDBLOCK'
+}
+
+function lockDarwin(data: string, pid: number): LockResult {
+  let fd: number
   try {
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        linkSync(staged, path)
-        return {
-          ok: true,
-          release: () => {
-            if (lockHolder(data) === pid) rmSync(path, { force: true })
-          },
-        }
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
-      }
-      const holder = lockHolder(data)
-      if (holder !== null) return { ok: false, pid: holder }
-      const moved = join(data, `${LOCK_FILE}.stale.${pid}`)
-      try {
-        renameSync(path, moved)
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
-        continue
-      }
-      const movedPid = Number(readFileSync(moved, 'utf8').trim())
-      if (alive(movedPid)) {
-        try {
-          linkSync(moved, path)
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
-        }
-        rmSync(moved, { force: true })
-        return { ok: false, pid: movedPid }
-      }
-      rmSync(moved, { force: true })
-    }
-    const holder = lockHolder(data)
-    return { ok: false, pid: holder ?? 0 }
-  } finally {
-    unlinkSync(staged)
+    fd = openSync(
+      join(data, LOCK_FILE),
+      constants.O_RDWR | constants.O_CREAT | DARWIN_O_EXLOCK | constants.O_NONBLOCK,
+      0o600,
+    )
+  } catch (err) {
+    if (busy(err)) return { ok: false, pid: recordedPid(data) }
+    throw err
   }
+  ftruncateSync(fd, 0)
+  writeSync(fd, `${pid}\n`, 0)
+  return {
+    ok: true,
+    release: () => {
+      ftruncateSync(fd, 0)
+      closeSync(fd)
+    },
+  }
+}
+
+function lockAbstract(data: string, pid: number): Promise<LockResult> {
+  const server = createServer((socket) => socket.destroy())
+  return new Promise((resolve, reject) => {
+    server.once('error', (err) => {
+      if (busy(err)) resolve({ ok: false, pid: recordedPid(data) })
+      else reject(err)
+    })
+    server.listen(`\0wire-runtime-${lockId(data)}`, () => {
+      server.unref()
+      writeFileSync(join(data, LOCK_FILE), `${pid}\n`, { mode: 0o600 })
+      resolve({
+        ok: true,
+        release: () => {
+          if (recordedPid(data) === pid) rmSync(join(data, LOCK_FILE), { force: true })
+          server.close()
+        },
+      })
+    })
+  })
+}
+
+export function acquireLock(
+  data: string,
+  pid = process.pid,
+  platform: NodeJS.Platform = process.platform,
+): Promise<LockResult> {
+  return platform === 'darwin' ? Promise.resolve(lockDarwin(data, pid)) : lockAbstract(data, pid)
+}
+
+export async function lockHeld(data: string): Promise<boolean> {
+  const lock = await acquireLock(data, process.pid)
+  if (!lock.ok) return true
+  lock.release()
+  return false
 }

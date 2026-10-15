@@ -13,6 +13,8 @@ import type { Right, Tokens } from './tokens.ts'
 export const RUNTIME_CONTRACT = 1
 export const RUNTIME_EVENTS: readonly string[] = []
 export const MAX_CLIENTS = 32
+export const MAX_UNAUTHENTICATED = 16
+export const HELLO_TIMEOUT_MS = 10_000
 export const APP_ERROR = -32000
 
 export class RpcError extends Error {}
@@ -42,6 +44,7 @@ export interface ServerOptions {
   hello: (session: Session) => Record<string, unknown>
   clientsChanged: (count: number) => void
   maxClients?: number
+  helloTimeoutMs?: number
 }
 
 class ClosingWriter extends SocketMessageWriter {
@@ -65,6 +68,7 @@ export class RuntimeServer {
   private readonly table = new Map<string, Method>()
   private readonly sessions = new Map<number, Live>()
   private readonly sockets = new Set<Socket>()
+  private readonly waiting = new Set<Socket>()
   private server: Server | null = null
   private nextId = 1
 
@@ -97,12 +101,23 @@ export class RuntimeServer {
   }
 
   private accept(socket: Socket): void {
+    if (this.waiting.size >= MAX_UNAUTHENTICATED) {
+      socket.destroy()
+      return
+    }
     this.sockets.add(socket)
+    this.waiting.add(socket)
+    const helloTimer = setTimeout(
+      () => socket.destroy(),
+      this.opts.helloTimeoutMs ?? HELLO_TIMEOUT_MS,
+    )
     socket.on('error', () => socket.destroy())
     const writer = new ClosingWriter(socket)
     const connection = createMessageConnection(new SocketMessageReader(socket), writer)
     let session: Live | null = null
     socket.on('close', () => {
+      clearTimeout(helloTimer)
+      this.waiting.delete(socket)
       this.sockets.delete(socket)
       connection.dispose()
       if (!session) return
@@ -133,8 +148,10 @@ export class RuntimeServer {
           notify: (event, eventParams) => {
             void connection.sendNotification(event, eventParams).catch(() => {})
           },
-          close: () => socket.end(),
+          close: () => socket.destroy(),
         }
+        clearTimeout(helloTimer)
+        this.waiting.delete(socket)
         session = live
         this.sessions.set(live.id, live)
         this.opts.clientsChanged(this.sessions.size)
