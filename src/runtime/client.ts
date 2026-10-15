@@ -1,5 +1,11 @@
 import { type Socket, connect } from 'node:net'
-import { RpcError, RpcPeer } from './rpc.ts'
+import {
+  type MessageConnection,
+  ResponseError,
+  SocketMessageReader,
+  SocketMessageWriter,
+  createMessageConnection,
+} from 'vscode-jsonrpc/node'
 import { RUNTIME_CONTRACT } from './server.ts'
 
 export const START_WAIT_MS = 5_000
@@ -33,47 +39,66 @@ function open(path: string): Promise<Socket> {
 }
 
 function callError(err: unknown): unknown {
-  return err instanceof RpcError ? new RuntimeCallError(err.message) : err
+  return err instanceof ResponseError ? new RuntimeCallError(err.message) : err
+}
+
+function untilClosed<T>(closed: Promise<void>, request: Promise<T>): Promise<T> {
+  return Promise.race([
+    request,
+    closed.then(() => {
+      throw new RuntimeCallError('connection-closed')
+    }),
+  ])
 }
 
 export class RuntimeClient {
   private constructor(
-    private readonly peer: RpcPeer,
+    private readonly socket: Socket,
+    private readonly connection: MessageConnection,
+    readonly closed: Promise<void>,
     readonly hello: Hello,
   ) {}
 
   static async connect(opts: ClientOptions): Promise<RuntimeClient> {
-    const peer = new RpcPeer(await open(opts.socket))
+    const socket = await open(opts.socket)
+    socket.on('error', () => socket.destroy())
+    const connection = createMessageConnection(
+      new SocketMessageReader(socket),
+      new SocketMessageWriter(socket),
+    )
+    connection.onError(() => socket.destroy())
+    const closed = new Promise<void>((resolve) => socket.once('close', () => resolve()))
+    connection.listen()
     try {
-      const hello = (await peer.request('hello', {
-        contract: opts.contract ?? RUNTIME_CONTRACT,
-        token: opts.token,
-      })) as Hello
-      return new RuntimeClient(peer, hello)
+      const hello = (await untilClosed(
+        closed,
+        connection.sendRequest('hello', {
+          contract: opts.contract ?? RUNTIME_CONTRACT,
+          token: opts.token,
+        }),
+      )) as Hello
+      return new RuntimeClient(socket, connection, closed, hello)
     } catch (err) {
-      peer.close()
+      socket.destroy()
       throw callError(err)
     }
   }
 
   async call<T = unknown>(method: string, params: unknown = {}): Promise<T> {
     try {
-      return (await this.peer.request(method, params)) as T
+      return (await untilClosed(this.closed, this.connection.sendRequest(method, params))) as T
     } catch (err) {
       throw callError(err)
     }
   }
 
   on(event: string, handler: (params: unknown) => void): void {
-    this.peer.onNotification(event, handler)
-  }
-
-  get closed(): Promise<void> {
-    return this.peer.closed
+    this.connection.onNotification(event, handler)
   }
 
   close(): void {
-    this.peer.close()
+    this.connection.dispose()
+    this.socket.destroy()
   }
 }
 

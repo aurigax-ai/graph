@@ -1,11 +1,21 @@
 import { chmodSync, rmSync } from 'node:fs'
 import { type Server, type Socket, createServer } from 'node:net'
-import { METHOD_NOT_FOUND, RpcError, RpcPeer } from './rpc.ts'
+import {
+  ErrorCodes,
+  Message,
+  ResponseError,
+  SocketMessageReader,
+  SocketMessageWriter,
+  createMessageConnection,
+} from 'vscode-jsonrpc/node'
 import type { Right, Tokens } from './tokens.ts'
 
 export const RUNTIME_CONTRACT = 1
 export const RUNTIME_EVENTS: readonly string[] = []
 export const MAX_CLIENTS = 32
+export const APP_ERROR = -32000
+
+export class RpcError extends Error {}
 
 export interface Session {
   readonly id: number
@@ -32,6 +42,23 @@ export interface ServerOptions {
   hello: (session: Session) => Record<string, unknown>
   clientsChanged: (count: number) => void
   maxClients?: number
+}
+
+class ClosingWriter extends SocketMessageWriter {
+  closing = false
+
+  constructor(private readonly target: Socket) {
+    super(target)
+  }
+
+  override async write(msg: Message): Promise<void> {
+    await super.write(msg)
+    if (this.closing && Message.isResponse(msg)) this.target.end()
+  }
+}
+
+function fail(message: string): ResponseError<undefined> {
+  return new ResponseError(APP_ERROR, message)
 }
 
 export class RuntimeServer {
@@ -71,35 +98,42 @@ export class RuntimeServer {
 
   private accept(socket: Socket): void {
     this.sockets.add(socket)
-    const peer = new RpcPeer(socket)
+    socket.on('error', () => socket.destroy())
+    const writer = new ClosingWriter(socket)
+    const connection = createMessageConnection(new SocketMessageReader(socket), writer)
     let session: Live | null = null
-    void peer.closed.then(() => {
+    socket.on('close', () => {
       this.sockets.delete(socket)
+      connection.dispose()
       if (!session) return
       this.sessions.delete(session.id)
       for (const fn of session.closed.splice(0)) fn()
       this.opts.clientsChanged(this.sessions.size)
     })
-    const refuse = (code: string): never => {
-      peer.endAfterReply()
-      throw new RpcError(code)
+    connection.onError(() => socket.destroy())
+    const refuse = (code: string) => {
+      writer.closing = true
+      return fail(code)
     }
-    peer.onRequest(async (method, params) => {
+    connection.onRequest(async (method: string, params: unknown) => {
       if (method === 'hello') {
-        if (session) throw new RpcError('already-hello')
+        if (session) return fail('already-hello')
         const hello = (params ?? {}) as { contract?: unknown; token?: unknown }
-        if (hello.contract !== RUNTIME_CONTRACT) refuse('unsupported-contract')
+        if (hello.contract !== RUNTIME_CONTRACT) return refuse('unsupported-contract')
         const verified = this.opts.tokens.verify(hello.token)
         if (!verified) return refuse('unauthorized')
-        if (this.sessions.size >= (this.opts.maxClients ?? MAX_CLIENTS)) refuse('too-many-clients')
+        if (this.sessions.size >= (this.opts.maxClients ?? MAX_CLIENTS))
+          return refuse('too-many-clients')
         const live: Live = {
           id: this.nextId++,
           client: verified.client,
           rights: new Set(verified.rights),
           token: hello.token as string,
           closed: [],
-          notify: (event, eventParams) => peer.notify(event, eventParams),
-          close: () => peer.close(),
+          notify: (event, eventParams) => {
+            void connection.sendNotification(event, eventParams).catch(() => {})
+          },
+          close: () => socket.end(),
         }
         session = live
         this.sessions.set(live.id, live)
@@ -107,17 +141,18 @@ export class RuntimeServer {
         return this.opts.hello(live)
       }
       const entry = this.table.get(method)
-      if (!entry) throw new RpcError('method-not-found', METHOD_NOT_FOUND)
-      if (!session) throw new RpcError('hello-first')
+      if (!entry) return new ResponseError(ErrorCodes.MethodNotFound, 'method-not-found')
+      if (!session) return fail('hello-first')
       if (entry.right && !session.rights.has(entry.right))
-        throw new RpcError(`needs-right: ${entry.right}`)
+        return fail(`needs-right: ${entry.right}`)
       try {
-        return await entry.handler(params, session)
+        return (await entry.handler(params, session)) ?? null
       } catch (err) {
-        if (err instanceof RpcError) throw err
-        throw new RpcError(`internal: ${err instanceof Error ? err.message : String(err)}`)
+        if (err instanceof RpcError) return fail(err.message)
+        return fail(`internal: ${err instanceof Error ? err.message : String(err)}`)
       }
     })
+    connection.listen()
   }
 
   onClose(session: Session, fn: () => void): void {
