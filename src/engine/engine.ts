@@ -331,9 +331,9 @@ export class Engine {
     return matched
   }
 
-  async rearm(scope: string, kinds: readonly string[]): Promise<void> {
+  async reattachWaiting(scope: string, kinds: readonly string[]): Promise<void> {
     const set = new Set(kinds)
-    for (const run of this.active(scope)) await run.rearmWaiting(set)
+    for (const run of this.active(scope)) await run.reattachWaiting(set)
   }
 
   timed(): boolean {

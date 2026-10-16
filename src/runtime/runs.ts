@@ -89,9 +89,7 @@ export class RuntimeRuns implements Part {
     clock: Clock = realClock,
   ) {
     this.registry = new Registry(runtime.paths.data, () => clock.now())
-    this.workers = new WorkerPool(this.registry, (scopes, kinds) =>
-      this.workersChanged(scopes, kinds),
-    )
+    this.workers = new WorkerPool(this.registry, (added) => this.workersChanged(added))
     const headless = commandNode((req) => {
       const scope = this.registry.byKey(req.scope)
       if (!scope || scope.sandboxed)
@@ -148,10 +146,11 @@ export class RuntimeRuns implements Part {
     return this.engine.timed()
   }
 
-  private workersChanged(scopes: string[], kinds: string[]): void {
+  private workersChanged(added: { scope: string; kinds: string[] }[]): void {
     this.runtime.server.broadcast('worker.changed', { workers: this.workers.list() })
-    for (const scope of scopes) {
-      if (kinds.length > 0) void this.engine.rearm(scope, kinds).catch(() => {})
+    for (const { scope, kinds } of added) {
+      if (kinds.length === 0) continue
+      void this.engine.reattachWaiting(scope, kinds).catch(() => {})
       for (const kind of kinds)
         void this.engine.deliver({ type: WORKER_READY, kind, scope }, scope).catch(() => {})
     }
@@ -310,9 +309,13 @@ export class RuntimeRuns implements Part {
     })
     server.method('graphs.list', 'observe', (raw) => {
       const scope = this.registry.scope(params(raw).scope)
-      return this.registry
-        .listings(scope)
-        .map((l) => ({ ...listingView(l), skipped: this.engine.skippedCount(scope.key, l.name) }))
+      return this.registry.listings(scope).map((l) => ({
+        ...listingView(l),
+        skipped: this.engine.skippedCount(scope.key, l.name),
+        ...(this.triggers.filesRefused(scope) && l.loaded?.graph.on.some((t) => 'files' in t)
+          ? { filesRefused: true }
+          : {}),
+      }))
     })
     server.method('graphs.enable', 'enable', (raw) => {
       const p = params(raw)

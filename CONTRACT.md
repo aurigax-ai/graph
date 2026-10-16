@@ -60,7 +60,7 @@ own, so a client can say which runtime it met.
 | `scopes.register` | `observe` | `{ folder, sandboxed?, scratch? }` | `{ scope, folder, sandboxed }` |
 | `graphs.load` | `observe` | `{ scope, path }` | a graph |
 | `graphs.unload` | `observe` | `{ scope, name }` | `{ ok }` |
-| `graphs.list` | `observe` | `{ scope }` | graphs, each with `skipped`, the starts the runtime skipped |
+| `graphs.list` | `observe` | `{ scope }` | graphs, each with `skipped`, the starts the runtime skipped, and `filesRefused` when its folder has too many folders to watch |
 | `graphs.enable` | `enable` | `{ scope, name, fingerprint }` | a graph |
 | `graphs.disable` | `enable` | `{ scope, name }` | a graph |
 | `runs.list` | `observe` | `{ scope }` | run summaries |
@@ -108,9 +108,13 @@ worker went away), `cancel` and `rearm`. The worker answers `{ done }`, `{ waiti
 `cancel` and `rearm`. With no worker for its kind and folder, a step waits as pending
 (`{ on: "worker" }`, shown as `pending`) and its timeout does not run; when a worker registers it
 starts once and its timeout starts then. When a worker goes away during a step, the step is
-reattached through the next worker instead of started again. If that worker answers `lost`, a
-step that never confirmed its start starts with its own input, an `agent` step that had started
-fails `AgentGone`, and any other step starts again with its own input.
+reattached through the next worker instead of started again. A worker that starts serving a kind
+in a folder (a new connection, or a kind or folder it did not serve) has every waiting step of
+that kind there, and every step left pending by a worker that went away, reattached through it as
+after a restart: `{ waiting }` with the same wait keeps the step waiting and re-arms it, another
+`{ waiting }` waits on that, `{ done }` ends it, and `lost` interrupts a step that runs once
+(`agent`) and starts any other again as its next attempt, with its own input and the same attempt
+key. Registering the same kinds and folders again reattaches nothing.
 
 `events.push` delivers an event (`{ type, ... }`, such as an agent's stop or an answer) to the
 waiting steps of one of the client's scopes; `worker-ready` is the runtime's own. Its `trigger`,

@@ -97,7 +97,12 @@ function errorParts(err: unknown): { name: string; message: string } {
 function waitMatches(wait: NodeWait, event: Output): boolean {
   if (wait.on === 'timer') return false
   if (wait.on === 'worker')
-    return event.type === WORKER_READY && event.kind === wait.kind && event.scope === wait.scope
+    return (
+      wait.pending !== 'reattach' &&
+      event.type === WORKER_READY &&
+      event.kind === wait.kind &&
+      event.scope === wait.scope
+    )
   const match = wait.on === 'event' ? wait.match : { type: 'answer', key: wait.ask.key }
   return Object.entries(match).every(([k, v]) => event[k] === v)
 }
@@ -788,17 +793,17 @@ export class GraphRun {
     }).then(() => done)
   }
 
-  rearmWaiting(kinds: ReadonlySet<string>): Promise<void> {
+  reattachWaiting(kinds: ReadonlySet<string>): Promise<void> {
     return this.serial(async () => {
+      if (isEnded(this.state.status)) return
       for (const [id, active] of [...this.state.active]) {
         const wait = active.wait
-        if (active.phase !== 'waiting' || !wait || wait.on === 'worker') continue
+        if (active.phase !== 'waiting' || !wait) continue
+        if (wait.on === 'worker' && wait.pending !== 'reattach') continue
         if (!kinds.has(this.node(id).kind)) continue
-        const live = this.liveOf(id)
-        await this.kind(id)
-          .impl.rearm?.(wait, active.started, this.context(id, active, live.abort.signal))
-          .catch(() => {})
+        await this.recoverNode(id, active)
       }
+      await this.pump()
     })
   }
 
@@ -834,8 +839,15 @@ export class GraphRun {
       node: id,
       verdict: typeof verdict === 'string' ? verdict : 'done' in verdict ? 'done' : 'running',
     })
-    if (typeof verdict === 'object' && 'waiting' in verdict)
+    if (typeof verdict === 'object' && 'waiting' in verdict) {
+      if (verdict.waiting.on !== 'worker')
+        this.armTimeout(
+          id,
+          active,
+          active.wait?.on === 'worker' ? this.deps.host.clock.now() : active.startedAt,
+        )
       return this.onResult(id, live.gen, verdict)
+    }
     if (verdict === 'running') {
       if (active.wait?.on !== 'worker') this.armTimeout(id, active)
       if (active.wait) {
