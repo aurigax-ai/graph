@@ -110,6 +110,7 @@ export class WorkerPool {
         trigger: ctx.trigger,
         timeoutMs: ctx.timeoutMs,
         history: ctx.history(),
+        input: ctx.input,
         ...extra,
       })
     } catch {
@@ -123,7 +124,7 @@ export class WorkerPool {
 function pending(
   kind: string,
   ctx: NodeContext,
-  what: Pick<WorkerWait, 'pending' | 'input' | 'wait' | 'event'>,
+  what: Pick<WorkerWait, 'pending' | 'input' | 'started' | 'wait' | 'event'>,
 ): NodeResult {
   return { waiting: { on: 'worker', kind, scope: ctx.scope, ...what } }
 }
@@ -172,12 +173,23 @@ export function workerKind(opts: WorkerKindOptions): NodeKind {
     }
   }
 
+  const startedOf = (ctx: NodeContext) => ctx.started(ctx.run.node)?.started
+  const gone = (ctx: NodeContext, what: Pick<WorkerWait, 'pending' | 'wait' | 'event'>) => {
+    const started = startedOf(ctx)
+    return pending(kind, ctx, { ...what, input: ctx.input, ...(started ? { started } : {}) })
+  }
+
   const reattachThrough = async (wait: WorkerWait, ctx: NodeContext): Promise<NodeResult> => {
     try {
       const reply = await pool.task(kind, 'reattach', ctx, {
         ...(wait.wait ? { wait: wait.wait } : {}),
+        ...(wait.started ? { started: wait.started } : {}),
       })
-      if ('lost' in reply) return start(wait.input ?? {}, ctx)
+      if ('lost' in reply) {
+        if (wait.started && (ctx.node.once ?? descriptor.once))
+          throw new NodeError('AgentGone', `${ctx.run.node} was lost while its worker was away`)
+        return start(wait.input ?? ctx.input, ctx)
+      }
       return result(reply)
     } catch (err) {
       if (!(err instanceof WorkerGone)) throw err
@@ -187,16 +199,17 @@ export function workerKind(opts: WorkerKindOptions): NodeKind {
 
   const resume = async (wait: NodeWait, event: Output, ctx: NodeContext): Promise<NodeResult> => {
     if (wait.on === 'worker') {
-      if (wait.pending === 'start') return start(wait.input ?? {}, ctx)
+      if (wait.pending === 'start') return start(wait.input ?? ctx.input, ctx)
       if (wait.pending === 'reattach') return reattachThrough(wait, ctx)
       return resume(wait.wait as NodeWait, wait.event ?? {}, ctx)
     }
+    refuse(ctx)
     if (local(ctx) && headless?.resume) return headless.resume(wait, event, ctx)
     try {
       return result(await pool.task(kind, 'resume', ctx, { wait, event }))
     } catch (err) {
       if (!(err instanceof WorkerGone)) throw err
-      return pending(kind, ctx, {
+      return gone(ctx, {
         pending: err.message === 'no worker' ? 'resume' : 'reattach',
         wait,
         event,
@@ -224,7 +237,7 @@ export function workerKind(opts: WorkerKindOptions): NodeKind {
     } catch (err) {
       if (!(err instanceof WorkerGone)) return 'lost'
       if (wait) return 'running'
-      return pending(kind, ctx, { pending: 'reattach' }) as { waiting: NodeWait }
+      return gone(ctx, { pending: 'reattach' }) as { waiting: NodeWait }
     }
   }
 

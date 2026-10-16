@@ -94,7 +94,9 @@ sandboxed. A `connector` step in a sandboxed folder fails `ConnectorFailed`.
 
 The runtime sends each step to a worker as a request, `worker.task`:
 
-`{ op, kind, scope, folder, run, node, trigger, timeoutMs, history, input?, wait?, started?, event? }`
+`{ op, kind, scope, folder, run, node, trigger, timeoutMs, history, input, wait?, started?, event? }`
+
+where `input` is the step's own input.
 
 with `op` one of `start`, `resume` (an event for its wait), `reattach` (after the runtime or the
 worker went away), `cancel` and `rearm`. The worker answers `{ done }`, `{ waiting, started? }`,
@@ -102,7 +104,9 @@ worker went away), `cancel` and `rearm`. The worker answers `{ done }`, `{ waiti
 `cancel` and `rearm`. With no worker for its kind and folder, a step waits as pending
 (`{ on: "worker" }`, shown as `pending`) and its timeout does not run; when a worker registers it
 starts once and its timeout starts then. When a worker goes away during a step, the step is
-reattached through the next worker instead of started again.
+reattached through the next worker instead of started again. If that worker answers `lost`, a
+step that never confirmed its start starts with its own input, an `agent` step that had started
+fails `AgentGone`, and any other step starts again with its own input.
 
 `events.push` delivers an event (`{ type, ... }`, such as an agent's stop or an answer) to the
 waiting steps of one of the client's scopes; `worker-ready` is the runtime's own.

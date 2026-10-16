@@ -188,6 +188,7 @@ export class GraphRun {
       trigger: this.state.trigger,
       started: (nodeId: string) => this.state.history.get(nodeId) ?? null,
       history: () => [...this.state.history.values()],
+      input: active.input,
       node: this.node(id),
     }
   }

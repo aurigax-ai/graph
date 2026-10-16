@@ -474,4 +474,100 @@ describe('workers and pairing', () => {
       cli.call('events.push', { scope, event: { type: 'worker-ready', kind: 'agent', scope } }),
     ).rejects.toThrow('reserved-event')
   })
+  it('GRF-C204 when the next worker answers lost, a step that never confirmed its start starts with its own input, and an agent that had started fails AgentGone', async () => {
+    const { paths } = runtimePlace()
+    const runtime = await started(paths)
+    const folder = folderWith({ g: graph(AGENT), h: graph(AGENT) })
+    const panel = await track(pairedClient(runtime, 'panel', RIGHTS))
+    const scope = await enabled(panel, folder, ['g', 'h'])
+    const hanging = await track(pairedClient(runtime, 'hang', WORKER_RIGHTS))
+    hanging.handle('worker.task', () => new Promise(() => {}))
+    await hanging.call('scopes.register', { folder })
+    await hanging.call('worker.register', { kinds: ['agent'], scopes: [scope] })
+    const first = await panel.call<{ runId: string }>('runs.start', { scope, name: 'g' })
+    await until(async () => (await nodeStatus(panel, scope, first.runId, 'a')) === 'running')
+    hanging.close()
+    await until(async () => (await nodeStatus(panel, scope, first.runId, 'a')) === 'pending')
+    const state = hostState()
+    const tasks: WorkerTask[] = []
+    const lostKind = { ...fakeAgentKind(state), reattach: async () => 'lost' as const }
+    const next = await worker(
+      () => pairedClient(runtime, 'ostia', WORKER_RIGHTS),
+      folder,
+      [lostKind],
+      {
+        tasks,
+      },
+    )
+    await until(() => state.agents.length === 1)
+    expect(tasks.map((t) => t.op)).toEqual(['reattach', 'start'])
+    expect(state.agents[0]?.input).toMatchObject({ mode: 'start', agent: 'claude', prompt: 'p' })
+    next.c.close()
+
+    const resumes: string[] = []
+    const holding = {
+      ...fakeAgentKind(state),
+      resume: () => {
+        resumes.push('resume')
+        return new Promise<never>(() => {})
+      },
+    }
+    const holder = await worker(() => pairedClient(runtime, 'holder', WORKER_RIGHTS), folder, [
+      holding,
+    ])
+    const second = await panel.call<{ runId: string }>('runs.start', { scope, name: 'h' })
+    await until(() => state.agents.length === 2)
+    await holder.c.call('events.push', {
+      scope,
+      event: { type: 'agent-stop', pane: state.agents[1]?.pane },
+    })
+    await until(() => resumes.length === 1)
+    holder.c.close()
+    await until(async () => (await nodeStatus(panel, scope, second.runId, 'a')) === 'pending')
+    const after: WorkerTask[] = []
+    await worker(() => pairedClient(runtime, 'ostia', WORKER_RIGHTS), folder, [lostKind], {
+      tasks: after,
+    })
+    await until(async () => (await status(panel, scope, second.runId)) === 'failed')
+    expect(after.map((t) => t.op)).toEqual(['reattach'])
+    expect(state.agents).toHaveLength(2)
+    const run = await panel.call<{ summary: { failure?: { name: string } } }>('runs.show', {
+      scope,
+      runId: second.runId,
+    })
+    expect(run.summary.failure?.name).toBe('AgentGone')
+  })
+
+  it('GRF-C200 revoking a client whose token is a file removes the file and closes its live connection', async () => {
+    const { paths } = runtimePlace()
+    const token = provisionToken(paths.data, 'host', RIGHTS)
+    const runtime = await started(paths)
+    const live = await track(RuntimeClient.connect({ socket: paths.socket, token }))
+    expect(runtime.tokens.revoke('host')).toBe(true)
+    runtime.reloadTokens()
+    await live.closed
+    expect(existsSync(join(paths.data, 'tokens', 'host'))).toBe(false)
+    await expect(RuntimeClient.connect({ socket: paths.socket, token })).rejects.toThrow(
+      'unauthorized',
+    )
+  })
+
+  it('GRF-C202 events.push needs the ingest right and a scope the client registered', async () => {
+    const { paths } = runtimePlace()
+    const blind = provisionToken(paths.data, 'blind', ['observe', 'worker'])
+    const runtime = await started(paths)
+    const folder = folderWith({ g: ASK })
+    const panel = await track(pairedClient(runtime, 'panel', RIGHTS))
+    const scope = await enabled(panel, folder, ['g'])
+    const noIngest = await track(RuntimeClient.connect({ socket: paths.socket, token: blind }))
+    await noIngest.call('scopes.register', { folder })
+    await expect(
+      noIngest.call('events.push', { scope, event: { type: 'answer' } }),
+    ).rejects.toThrow('needs-right: ingest')
+    const stranger = await track(pairedClient(runtime, 'stranger', WORKER_RIGHTS))
+    await expect(
+      stranger.call('events.push', { scope, event: { type: 'answer' } }),
+    ).rejects.toThrow('unknown-scope')
+    expect(await panel.call('runs.list', { scope })).toEqual([])
+  })
 })

@@ -37,6 +37,7 @@ function contextOf(task: WorkerTask, host: string): NodeContext {
     trigger: task.trigger,
     started: (id) => task.history.find((h) => h.node === id) ?? null,
     history: () => task.history,
+    input: task.input ?? {},
     node: task.node,
   }
 }

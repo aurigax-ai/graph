@@ -17,6 +17,7 @@ export interface WorkerWait {
   scope: string
   pending: 'start' | 'resume' | 'reattach'
   input?: Output
+  started?: Output
   wait?: NodeWait
   event?: Output
 }
@@ -62,6 +63,7 @@ export interface NodeContext {
   trigger: Output
   started: (nodeId: string) => StartedRecord | null
   history: () => StartedRecord[]
+  input: Output
   node: GraphNode
 }
 
