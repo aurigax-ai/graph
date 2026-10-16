@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto'
-import { readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { type LoadedGraph, readGraphFile } from '../format/graphFile.ts'
 import { NAME_PATTERN, type Problem, isRecord, problem } from '../format/model.ts'
+import { writePrivate } from './privateFile.ts'
 import { RpcError } from './server.ts'
 
 export const SCOPES_FILE = 'scopes.json'
@@ -50,9 +51,7 @@ function readJson(path: string): unknown {
 }
 
 function writeJson(path: string, value: unknown): void {
-  const staged = `${path}.${process.pid}`
-  writeFileSync(staged, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 })
-  renameSync(staged, path)
+  writePrivate(path, `${JSON.stringify(value, null, 2)}\n`)
 }
 
 function realOf(path: string): string {

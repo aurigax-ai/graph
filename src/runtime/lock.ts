@@ -7,11 +7,11 @@ import {
   openSync,
   readFileSync,
   rmSync,
-  writeFileSync,
   writeSync,
 } from 'node:fs'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
+import { privateTemp, writePrivate } from './privateFile.ts'
 
 export const LOCK_FILE = 'runtime.lock'
 export const LOCK_ID_FILE = 'lock-id'
@@ -25,8 +25,7 @@ function lockId(data: string): string {
     const id = readFileSync(path, 'utf8').trim()
     if (/^[0-9a-f]{32}$/.test(id)) return id
   } catch {}
-  const staged = `${path}.${process.pid}`
-  writeFileSync(staged, `${randomBytes(16).toString('hex')}\n`, { mode: 0o600 })
+  const staged = privateTemp(path, `${randomBytes(16).toString('hex')}\n`)
   try {
     linkSync(staged, path)
   } catch (err) {
@@ -83,7 +82,7 @@ function lockAbstract(data: string, pid: number): Promise<LockResult> {
     })
     server.listen(`\0wire-runtime-${lockId(data)}`, () => {
       server.unref()
-      writeFileSync(join(data, LOCK_FILE), `${pid}\n`, { mode: 0o600 })
+      writePrivate(join(data, LOCK_FILE), `${pid}\n`)
       resolve({
         ok: true,
         release: () => {

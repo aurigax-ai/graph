@@ -48,7 +48,8 @@ connections.
 An error's `message` is its code, with detail after a colon where there is any:
 `hello-first`, `already-hello`, `unsupported-contract`, `unauthorized`, `too-many-clients`,
 `needs-right: <right>`, `method-not-found` (JSON-RPC code -32601), `internal: <text>`. Every other
-error has JSON-RPC code -32000.
+error has JSON-RPC code -32000. `unsupported-contract` carries `data: { contract, version }`, the runtime's
+own, so a client can say which runtime it met.
 
 ## Methods
 
@@ -63,9 +64,12 @@ error has JSON-RPC code -32000.
 | `graphs.enable` | `enable` | `{ scope, name, fingerprint }` | a graph |
 | `graphs.disable` | `enable` | `{ scope, name }` | a graph |
 | `runs.list` | `observe` | `{ scope }` | run summaries |
-| `runs.show` | `observe` | `{ scope, runId, node? }` | a run, node by node |
+| `runs.show` | `observe` | `{ scope, runId, node? }` | a run, node by node, with its `graph` |
+| `runs.waiting` | `observe` | `{ scope, event }` | `[{ runId, graph, node }]`, the steps that event would reach |
+| `runs.report` | `worker` | `{ scope, runId, node, valid }` | `{ ok }`, journals whether a report was valid |
 | `runs.start` | `start` | `{ scope, name, input?, inputs?, by? }` | `{ runId }` or `{ queued: true }` |
 | `runs.control` | `control` | `{ scope, runId, action, node? }` | `{ ok }` |
+| `runtime.ceilings` | `control` | `{ steps?, runsPerHour?, parallel?, agents?, timeMs? }` | the ceilings |
 | `worker.register` | `worker` | `{ kinds, scopes }` | `{ kinds }` |
 | `events.push` | `ingest` | `{ scope, event?, trigger? }` | `{ matched, fired }` |
 
@@ -124,7 +128,11 @@ following `.gitignore`, never `.git`, `node_modules` or a link, at most 5000 fol
 a changed graph never fires. A runtime that is not a daemon fires nothing while it is not running;
 when it starts again, a schedule's `catchUp` decides whether a missed time fires once. Besides each
 graph's own limits, at most 16 runs are active and 240 runs start in an hour across the runtime;
-a start over either is `skipped`, naming the limit, and counted in `runtime.status`.
+a start over either is `skipped`, naming the limit, and counted in `runtime.status`. A client
+with `control` sets ceilings no graph's own `limits` pass (`runtime.ceilings`, at most 500 steps,
+60 runs an hour, 8 in parallel, 24 agents and 168 hours; a ceiling left out keeps its value, and
+each value is a whole number); they are kept in `<data>/ceilings.json`
+and apply also while that client is away.
 
 `mode` is `client` (the runtime exits 60 s after its last client leaves while no step is running
 or waiting on a timer) or `daemon` (started with `--daemon`; it runs until `wire runtime stop`).

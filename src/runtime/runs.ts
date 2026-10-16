@@ -13,6 +13,7 @@ import { descriptorOf } from '../kinds/catalog.ts'
 import { commandNode } from '../kinds/command.ts'
 import { routerNode, waitNode } from '../kinds/smallKinds.ts'
 import type { TriggerEvent } from '../triggers/match.ts'
+import { ceilingsOf, loadCeilings, saveCeilings } from './ceilings.ts'
 import { type Listing, Registry, type Scope } from './registry.ts'
 import type { Part, Runtime } from './runtime.ts'
 import { RpcError, type Session } from './server.ts'
@@ -124,11 +125,13 @@ export class RuntimeRuns implements Part {
       notify: (notice) => this.notice(notice),
     }
     this.clock = clock
+    const saved = loadCeilings(runtime.paths.data)
     this.engine = new Engine({
       host,
       store: new FileJournalStore(join(runtime.paths.data, RUNS_FOLDER), () => clock.now()),
       changed: (runId, line) => this.changed(runId, line),
       global: GLOBAL_LIMITS,
+      ...(saved ? { ceilings: saved } : {}),
     })
     this.triggers = new RuntimeTriggers({
       clock,
@@ -340,6 +343,25 @@ export class RuntimeRuns implements Part {
       if (!key) throw new RpcError('unknown-run')
       return this.view(scope, key, typeof p.node === 'string' ? p.node : undefined)
     })
+    server.method('runs.waiting', 'observe', (raw) => {
+      const p = params(raw)
+      const scope = this.registry.scope(p.scope)
+      if (!isRecord(p.event) || typeof p.event.type !== 'string') throw new RpcError('bad-event')
+      return this.engine
+        .waitingOn(p.event as Output)
+        .filter((w) => w.run.state.scope === scope.key)
+        .map((w) => ({ runId: w.run.id, graph: w.run.state.graphName, node: w.node }))
+    })
+    server.method('runs.report', 'worker', async (raw, session) => {
+      const p = params(raw)
+      const scope = this.ownScope(session, p.scope)
+      const run = typeof p.runId === 'string' ? this.engine.run(p.runId) : undefined
+      if (!run || run.state.scope !== scope.key) throw new RpcError('unknown-run')
+      if (typeof p.node !== 'string' || typeof p.valid !== 'boolean')
+        throw new RpcError('bad-report')
+      await run.recordReport(p.node, p.valid)
+      return { ok: true }
+    })
     server.method('worker.register', 'worker', (raw, session) => {
       const p = params(raw)
       if (!Array.isArray(p.scopes)) throw new RpcError('bad-scopes')
@@ -364,6 +386,12 @@ export class RuntimeRuns implements Part {
     })
     server.method('runs.start', 'start', (raw, session) => this.start(params(raw), session))
     server.method('runs.control', 'control', (raw) => this.control(params(raw)))
+    server.method('runtime.ceilings', 'control', (raw) => {
+      const ceilings = ceilingsOf(raw, this.engine.ceilings)
+      this.engine.ceilings = ceilings
+      saveCeilings(this.runtime.paths.data, ceilings)
+      return ceilings
+    })
   }
 
   private problem(listing: Listing): string | null {
@@ -380,7 +408,7 @@ export class RuntimeRuns implements Part {
     if (!stored || !graph) throw new RpcError('unknown-run')
     const view = runView({ ...key, scope: scope.key }, graph, stored.lines)
     const nodes = node ? view.nodes.filter((n) => n.node === node) : view.nodes
-    return { ...view, scope: scope.id, nodes }
+    return { ...view, scope: scope.id, nodes, graph }
   }
 
   private async start(p: Record<string, unknown>, session: Session): Promise<unknown> {

@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   statSync,
   symlinkSync,
@@ -569,5 +570,54 @@ describe('workers and pairing', () => {
       stranger.call('events.push', { scope, event: { type: 'answer' } }),
     ).rejects.toThrow('unknown-scope')
     expect(await panel.call('runs.list', { scope })).toEqual([])
+  })
+  it('GRF-C203 a worker finds the steps an event reaches, journals whether a report was valid, and reads the graph a run ran', async () => {
+    const { paths } = runtimePlace()
+    const runtime = await started(paths)
+    const folder = folderWith({ g: graph(AGENT) })
+    const panel = await track(pairedClient(runtime, 'panel', RIGHTS))
+    const scope = await enabled(panel, folder, ['g'])
+    const state = hostState()
+    const ostia = await worker(() => pairedClient(runtime, 'ostia', WORKER_RIGHTS), folder, [
+      fakeAgentKind(state),
+    ])
+    const { runId } = await panel.call<{ runId: string }>('runs.start', { scope, name: 'g' })
+    await until(() => state.agents.length === 1)
+    const pane = state.agents[0]?.pane
+    await until(async () => (await nodeStatus(panel, scope, runId, 'a')) === 'waiting')
+    expect(
+      await ostia.c.call('runs.waiting', { scope, event: { type: 'agent-stop', pane } }),
+    ).toEqual([{ runId, graph: 'g', node: 'a' }])
+    expect(
+      await ostia.c.call('runs.waiting', { scope, event: { type: 'agent-stop', pane: 'other' } }),
+    ).toEqual([])
+    const observer = await track(pairedClient(runtime, 'observer', ['observe']))
+    await observer.call('scopes.register', { folder })
+    await expect(
+      observer.call('runs.report', { scope, runId, node: 'a', valid: true }),
+    ).rejects.toThrow('needs-right: worker')
+    expect(await ostia.c.call('runs.report', { scope, runId, node: 'a', valid: false })).toEqual({
+      ok: true,
+    })
+    expect(journal(paths, scope, 'g', runId).some((l) => l.type === 'node-report')).toBe(true)
+    const shown = await panel.call<{ graph: { nodes: { id: string }[] } }>('runs.show', {
+      scope,
+      runId,
+    })
+    expect(shown.graph.nodes.map((n) => n.id)).toEqual(['a'])
+  })
+  it('GRF-C211 a token written where a stale 0644 temp and file exist lands only in a new 0600 file', async () => {
+    const { paths } = runtimePlace()
+    const folder = join(paths.data, 'tokens')
+    mkdirSync(folder, { recursive: true, mode: 0o700 })
+    const stale = join(folder, `ostia.${process.pid}`)
+    writeFileSync(stale, 'stale\n', { mode: 0o644 })
+    writeFileSync(join(folder, 'ostia'), 'old\n', { mode: 0o644 })
+    chmodSync(stale, 0o644)
+    const token = provisionToken(paths.data, 'ostia', RIGHTS)
+    expect(statSync(join(folder, 'ostia')).mode & 0o777).toBe(0o600)
+    expect(readFileSync(stale, 'utf8')).toBe('stale\n')
+    for (const name of readdirSync(folder))
+      if (name !== 'ostia') expect(readFileSync(join(folder, name), 'utf8')).not.toContain(token)
   })
 })
