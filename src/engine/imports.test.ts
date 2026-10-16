@@ -16,6 +16,7 @@ const ALLOWED_PACKAGES = [
   '@marcbachmann/cel-js',
   'vscode-jsonrpc',
   'ignore',
+  'typescript',
 ]
 
 function sources(dir: string): string[] {
