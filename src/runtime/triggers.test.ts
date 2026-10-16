@@ -209,6 +209,10 @@ describe('triggers and limits in the runtime', () => {
       }
     expect(answers.filter((a) => a === 'started')).toHaveLength(16)
     expect(answers[16]).toBe('skipped: at most 16 active runs in the runtime')
+    const listed = await panel.call<{ name: string; skipped: number }[]>('graphs.list', {
+      scope: scopes[4],
+    })
+    expect(listed.find((g) => g.name === 'g0')?.skipped).toBe(1)
 
     const results = await Promise.all(
       Array.from({ length: 150 }, (_, i) =>

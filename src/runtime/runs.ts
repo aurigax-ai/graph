@@ -310,7 +310,9 @@ export class RuntimeRuns implements Part {
     })
     server.method('graphs.list', 'observe', (raw) => {
       const scope = this.registry.scope(params(raw).scope)
-      return this.registry.listings(scope).map(listingView)
+      return this.registry
+        .listings(scope)
+        .map((l) => ({ ...listingView(l), skipped: this.engine.skippedCount(scope.key, l.name) }))
     })
     server.method('graphs.enable', 'enable', (raw) => {
       const p = params(raw)
