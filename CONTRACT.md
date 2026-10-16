@@ -60,14 +60,14 @@ own, so a client can say which runtime it met.
 | `scopes.register` | `observe` | `{ folder, sandboxed?, scratch? }` | `{ scope, folder, sandboxed }` |
 | `graphs.load` | `observe` | `{ scope, path }` | a graph |
 | `graphs.unload` | `observe` | `{ scope, name }` | `{ ok }` |
-| `graphs.list` | `observe` | `{ scope }` | graphs |
+| `graphs.list` | `observe` | `{ scope }` | graphs, each with `skipped`, the starts the runtime skipped |
 | `graphs.enable` | `enable` | `{ scope, name, fingerprint }` | a graph |
 | `graphs.disable` | `enable` | `{ scope, name }` | a graph |
 | `runs.list` | `observe` | `{ scope }` | run summaries |
 | `runs.show` | `observe` | `{ scope, runId, node? }` | a run, node by node, with its `graph` |
 | `runs.waiting` | `observe` | `{ scope, event }` | `[{ runId, graph, node }]`, the steps that event would reach |
 | `runs.report` | `worker` | `{ scope, runId, node, valid }` | `{ ok }`, journals whether a report was valid |
-| `runs.start` | `start` | `{ scope, name, input?, inputs?, by? }` | `{ runId }` or `{ queued: true }` |
+| `runs.start` | `start` | `{ scope, name, input?, inputs?, by?, pane? }` | `{ runId }` or `{ queued: true }` |
 | `runs.control` | `control` | `{ scope, runId, action, node? }` | `{ ok }` |
 | `runtime.ceilings` | `control` | `{ steps?, runsPerHour?, parallel?, agents?, timeMs? }` | the ceilings |
 | `worker.register` | `worker` | `{ kinds, scopes }` | `{ kinds }` |
@@ -86,7 +86,7 @@ graph, and enable records live in `<data>/enabled.json`. `runs.start` starts onl
 with a manual trigger: a client with `control` may say `by: "human"`, any other start is an
 agent's and needs `agents: true` on the trigger (`not-for-agents`). `input` is an object, `inputs`
 a list of `key=value`. `action` is `pause`, `resume`, `cancel`, `retry`, or `rerun`, `skip` and
-`continue` for an interrupted `node`.
+`continue` for an interrupted `node`. `pane` names the pane a start came from; it is the trigger's `pane`.
 
 ## Workers
 

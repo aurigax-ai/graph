@@ -310,7 +310,9 @@ export class RuntimeRuns implements Part {
     })
     server.method('graphs.list', 'observe', (raw) => {
       const scope = this.registry.scope(params(raw).scope)
-      return this.registry.listings(scope).map(listingView)
+      return this.registry
+        .listings(scope)
+        .map((l) => ({ ...listingView(l), skipped: this.engine.skippedCount(scope.key, l.name) }))
     })
     server.method('graphs.enable', 'enable', (raw) => {
       const p = params(raw)
@@ -434,7 +436,13 @@ export class RuntimeRuns implements Part {
       isRecord(p.input) ? JSON.stringify(p.input) : undefined,
     )
     if (!input.ok) throw new RpcError(`${input.problem.code}: ${input.problem.message}`)
-    const trigger: Output = { kind: 'manual', by: byHuman ? 'human' : 'agent' }
+    const trigger: Output = {
+      kind: 'manual',
+      by: byHuman ? 'human' : 'agent',
+      ...(typeof p.pane === 'string' && p.pane.length > 0 && p.pane.length <= 128
+        ? { pane: p.pane }
+        : {}),
+    }
     const res = await this.engine.start(
       scope.key,
       {
