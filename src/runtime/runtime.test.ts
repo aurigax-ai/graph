@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -392,4 +393,48 @@ describe('the runtime process', () => {
     expect(await answers(first.paths)).toBe(true)
     expect(await lockHeld(other.paths.data)).toBe(false)
   })
+  it('GRF-C191 on a fresh install status says nothing runs and start starts a runtime', async () => {
+    const { env, paths } = place()
+    const status = await output(wire(env, ['runtime', 'status']))
+    expect(status.code).toBe(0)
+    expect(JSON.parse(status.stdout)).toEqual({ running: false })
+    const started = await output(wire(env, ['runtime', 'start']))
+    expect(started.code).toBe(0)
+    const { pid } = JSON.parse(started.stdout) as { pid: number }
+    try {
+      expect(await answers(paths)).toBe(true)
+    } finally {
+      process.kill(pid, 'SIGKILL')
+    }
+  })
+
+  it.runIf(process.platform === 'linux')(
+    'GRF-C191 a runtime keeps none of the files its starter left open for its children',
+    async () => {
+      const { env } = place()
+      const marker = join(env.HOME as string, 'held-by-the-starter')
+      writeFileSync(marker, '')
+      const starter = spawn(
+        '/bin/sh',
+        ['-c', 'exec 7<"$2"; exec "$0" "$1" runtime start', process.execPath, BIN, marker],
+        { env, stdio: ['ignore', 'pipe', 'pipe'] },
+      )
+      children.push(starter)
+      const { code, stdout } = await output(starter)
+      const { pid } = JSON.parse(stdout) as { pid: number }
+      try {
+        expect(code).toBe(0)
+        const held = readdirSync(`/proc/${pid}/fd`).map((fd) => {
+          try {
+            return readlinkSync(`/proc/${pid}/fd/${fd}`)
+          } catch {
+            return ''
+          }
+        })
+        expect(held).not.toContain(marker)
+      } finally {
+        process.kill(pid, 'SIGKILL')
+      }
+    },
+  )
 })

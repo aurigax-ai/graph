@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import {
   constants,
   closeSync,
+  existsSync,
   ftruncateSync,
   linkSync,
   openSync,
@@ -103,6 +104,7 @@ export function acquireLock(
 }
 
 export async function lockHeld(data: string): Promise<boolean> {
+  if (!existsSync(data)) return false
   const lock = await acquireLock(data, process.pid)
   if (!lock.ok) return true
   lock.release()
