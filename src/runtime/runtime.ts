@@ -12,11 +12,16 @@ export const PROCESS_TITLE = 'wire-runtime'
 
 export type Mode = 'client' | 'daemon'
 
-export const PACKAGE_VERSION = (
-  JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
-    version: string
-  }
-).version
+let version: string | null = null
+
+export function packageVersion(): string {
+  version ??= (
+    JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
+      version: string
+    }
+  ).version
+  return version
+}
 
 export interface RuntimeOptions {
   paths?: RuntimePaths
@@ -63,14 +68,14 @@ export class Runtime {
       tokens: this.tokens,
       hello: (session) => ({
         contract: RUNTIME_CONTRACT,
-        version: PACKAGE_VERSION,
+        version: packageVersion(),
         pid: process.pid,
         mode: this.mode,
         client: session.client,
         rights: [...session.rights],
       }),
       clientsChanged: () => this.touch(),
-      version: PACKAGE_VERSION,
+      version: packageVersion(),
     })
     this.server.method('runtime.status', 'observe', () => this.status())
   }
@@ -78,7 +83,7 @@ export class Runtime {
   status(): Record<string, unknown> {
     return {
       pid: process.pid,
-      version: PACKAGE_VERSION,
+      version: packageVersion(),
       contract: RUNTIME_CONTRACT,
       mode: this.mode,
       clients: this.server.clients,

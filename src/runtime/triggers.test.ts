@@ -15,7 +15,7 @@ import { loadGraphText } from '../format/graphFile.ts'
 import { RuntimeCallError, RuntimeClient } from './client.ts'
 import type { RuntimePaths } from './paths.ts'
 import { scopeKey } from './registry.ts'
-import { PACKAGE_VERSION, type Runtime, type RuntimeOptions } from './runtime.ts'
+import { type Runtime, type RuntimeOptions, packageVersion } from './runtime.ts'
 import { pairedClient, runtimePlace, testRuntime } from './testRuntime.ts'
 import { RIGHTS, readCliToken } from './tokens.ts'
 import { RuntimeTriggers } from './triggers.ts'
@@ -348,7 +348,7 @@ describe('triggers and limits in the runtime', () => {
     }).catch((err: unknown) => err)
     expect(refused).toBeInstanceOf(RuntimeCallError)
     expect((refused as RuntimeCallError).message).toBe('unsupported-contract')
-    expect((refused as RuntimeCallError).data).toEqual({ contract: 1, version: PACKAGE_VERSION })
+    expect((refused as RuntimeCallError).data).toEqual({ contract: 1, version: packageVersion() })
   })
   it('GRF-C218 a trigger host stopped for a stop is not armed again by a later refresh', async () => {
     const clock = new FakeClock(START)
