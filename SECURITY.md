@@ -19,8 +19,10 @@ so another user cannot take it first.
 ## The known gap
 
 The runtime does not defend against another process of the same user that reads or writes its data
-folder: such a process can read the CLI's token, rewrite `enabled.json` to enable a graph, or edit a
-journal. That is the same class of risk as any file the user's own programs can write, and it is
+folder: such a process can read the CLI's token, write a token file into `tokens/` with any rights,
+rewrite `enabled.json` to enable a graph, or edit a journal. Nothing on the socket raises a
+client's rights: there is no pairing call, so a process that holds only the CLI's token needs such
+a file write to get more. That is the same class of risk as any file the user's own programs can write, and it is
 not in scope. Run untrusted programs as another user or in a sandbox.
 
 ## Reporting a vulnerability

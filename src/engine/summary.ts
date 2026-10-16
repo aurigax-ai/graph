@@ -9,6 +9,7 @@ export interface RunSummary extends RunKey {
   steps: number
   failure?: NodeFailure
   waitingOn: string[]
+  pendingOn: string[]
   interrupted: string[]
 }
 
@@ -24,6 +25,7 @@ export function summarize(
       startedAt: 0,
       steps: 0,
       waitingOn: [],
+      pendingOn: [],
       interrupted: [],
     }
   const active = [...state.active.values()]
@@ -37,6 +39,9 @@ export function summarize(
     steps: state.steps,
     ...(state.failure ? { failure: state.failure } : {}),
     waitingOn: active.filter((a) => a.phase === 'waiting').map((a) => a.node),
+    pendingOn: active
+      .filter((a) => a.phase === 'waiting' && a.wait?.on === 'worker')
+      .map((a) => a.node),
     interrupted: active.filter((a) => a.phase === 'interrupted').map((a) => a.node),
   }
 }
@@ -48,6 +53,7 @@ export interface NodeRunView {
   status:
     | 'running'
     | 'waiting'
+    | 'pending'
     | 'retrying'
     | 'interrupted'
     | 'done'
@@ -95,7 +101,7 @@ export function runView(key: RunKey, graph: GraphFile, lines: Line[]): RunView {
     } else if (line.type === 'node-wait') {
       const view = open.get(line.node)
       if (view) {
-        view.status = 'waiting'
+        view.status = line.wait.on === 'worker' ? 'pending' : 'waiting'
         view.wait = line.wait
         if (line.started) view.started = line.started
       }

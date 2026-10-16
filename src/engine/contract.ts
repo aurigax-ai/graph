@@ -9,10 +9,26 @@ export type NodeWait =
   | { on: 'event'; match: Record<string, unknown> }
   | { on: 'timer'; at: number }
   | { on: 'human'; ask: Record<string, unknown> }
+  | WorkerWait
+
+export interface WorkerWait {
+  on: 'worker'
+  kind: string
+  scope: string
+  pending: 'start' | 'resume' | 'reattach'
+  input?: Output
+  started?: Output
+  wait?: NodeWait
+  event?: Output
+}
 
 export type NodeResult = { done: Output } | { waiting: NodeWait; started?: Output }
 
-export type Reattached = 'running' | 'lost' | { done: Output }
+export type Reattached =
+  | 'running'
+  | 'lost'
+  | { done: Output }
+  | { waiting: NodeWait; started?: Output }
 
 export class NodeError extends Error {
   constructor(
@@ -46,6 +62,8 @@ export interface NodeContext {
   timeoutMs: number | null
   trigger: Output
   started: (nodeId: string) => StartedRecord | null
+  history: () => StartedRecord[]
+  input: Output
   node: GraphNode
 }
 
