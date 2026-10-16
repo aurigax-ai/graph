@@ -60,7 +60,7 @@ own, so a client can say which runtime it met.
 | `scopes.register` | `observe` | `{ folder, sandboxed?, scratch? }` | `{ scope, folder, sandboxed }` |
 | `graphs.load` | `observe` | `{ scope, path }` | a graph |
 | `graphs.unload` | `observe` | `{ scope, name }` | `{ ok }` |
-| `graphs.list` | `observe` | `{ scope }` | graphs |
+| `graphs.list` | `observe` | `{ scope }` | graphs, each with `skipped`, the starts the runtime skipped |
 | `graphs.enable` | `enable` | `{ scope, name, fingerprint }` | a graph |
 | `graphs.disable` | `enable` | `{ scope, name }` | a graph |
 | `runs.list` | `observe` | `{ scope }` | run summaries |
