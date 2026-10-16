@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { connect } from 'node:net'
 import type { Clock } from '../engine/contract.ts'
 import { acquireLock } from './lock.ts'
 import { PathRefusal, type RuntimePaths, ensurePrivateDir, runtimePaths } from './paths.ts'
@@ -36,6 +37,7 @@ export type StartOutcome =
   | { ok: true; runtime: Runtime }
   | { ok: false; error: 'already-running'; pid: number | null }
   | { ok: false; error: 'unsafe-folder'; message: string }
+  | { ok: false; error: 'socket-in-use'; message: string }
 
 export interface Part {
   busy?: () => boolean
@@ -132,6 +134,17 @@ export class Runtime {
   }
 }
 
+function answering(socket: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = connect(socket)
+    probe.once('connect', () => {
+      probe.destroy()
+      resolve(true)
+    })
+    probe.once('error', () => resolve(false))
+  })
+}
+
 export async function startRuntime(opts: RuntimeOptions = {}): Promise<StartOutcome> {
   const paths = opts.paths ?? runtimePaths()
   try {
@@ -144,6 +157,14 @@ export async function startRuntime(opts: RuntimeOptions = {}): Promise<StartOutc
   }
   const lock = await acquireLock(paths.data)
   if (!lock.ok) return { ok: false, error: 'already-running', pid: lock.pid }
+  if (await answering(paths.socket)) {
+    lock.release()
+    return {
+      ok: false,
+      error: 'socket-in-use',
+      message: `another runtime answers on ${paths.socket}`,
+    }
+  }
   let runtime: Runtime
   try {
     runtime = new Runtime(paths, lock.release, opts)

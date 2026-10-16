@@ -20,7 +20,9 @@ another user's. The socket and every file in the data folder are 0600. One runti
 folder: the lock is held by the kernel and ends with the process (on Linux an abstract socket named
 from the data folder's private `lock-id`, on macOS an exclusive lock on `runtime.lock`), and
 `runtime.lock` names the holder's pid. A second start exits with `already-running` and that pid.
-Clients find the runtime's pid by asking it (`runtime.status`), never from the file.
+Clients find the runtime's pid by asking it (`runtime.status`), never from the file. A runtime
+also refuses to start (`socket-in-use`) while another runtime, of another data folder, answers on
+its socket.
 
 ## Tokens and rights
 

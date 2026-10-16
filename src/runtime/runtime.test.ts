@@ -379,4 +379,17 @@ describe('the runtime process', () => {
     expect(await c.call('runtime.status')).toMatchObject({ pid: first.pid, mode: 'daemon' })
     c.close()
   })
+  it('GRF-C192 a runtime on another data folder whose socket another runtime holds refuses to start and leaves that runtime answering', async () => {
+    const first = place()
+    await inProcess(first.paths)
+    const other = place()
+    const shared = { ...other.paths, socketDir: first.paths.socketDir, socket: first.paths.socket }
+    expect(await startRuntime({ paths: shared })).toEqual({
+      ok: false,
+      error: 'socket-in-use',
+      message: `another runtime answers on ${first.paths.socket}`,
+    })
+    expect(await answers(first.paths)).toBe(true)
+    expect(await lockHeld(other.paths.data)).toBe(false)
+  })
 })
