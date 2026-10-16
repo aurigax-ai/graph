@@ -29,6 +29,7 @@ export {
 export { dryRun, parseMocks } from './engine/dryRun.ts'
 export {
   type Ceilings,
+  type GlobalLimits,
   DEFAULT_LIMITS,
   Engine,
   type EngineOptions,
@@ -82,6 +83,7 @@ export {
   liveTriggers,
   triggerPayload,
 } from './triggers/match.ts'
+export { FolderWatcher, type WatchStart } from './triggers/folderWatch.ts'
 export { PATH_BATCH_MS, PathBatch } from './triggers/pathBatch.ts'
 export { cronValid, nextScheduled } from './triggers/schedule.ts'
 export {

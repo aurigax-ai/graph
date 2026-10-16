@@ -96,9 +96,15 @@ interface GraphRecord {
   lastNotice: number
 }
 
+export interface GlobalLimits {
+  active: number
+  startsPerHour: number
+}
+
 export interface EngineOptions {
   host: Host
   store: JournalStore
+  global?: GlobalLimits
   ceilings?: Partial<Ceilings>
   changed?: (runId: string, line?: Line) => void
   dryRun?: boolean
@@ -109,6 +115,8 @@ export class Engine {
   private readonly records = new Map<string, GraphRecord>()
   private readonly kinds: Map<string, BoundKind>
   private held = false
+  private globalStarts: number[] = []
+  globalSkipped = 0
   ceilings: Ceilings
 
   constructor(private readonly opts: EngineOptions) {
@@ -207,6 +215,21 @@ export class Engine {
     }
     if (this.active(scope).length >= ACTIVE_PER_SCOPE) {
       return this.skip(scope, definition, `at most ${ACTIVE_PER_SCOPE} active runs in a workspace`)
+    }
+    const global = this.opts.global
+    if (global) {
+      this.globalStarts = this.globalStarts.filter((t) => now - t < HOUR_MS)
+      const reason =
+        this.active().length >= global.active
+          ? `at most ${global.active} active runs in the runtime`
+          : this.globalStarts.length >= global.startsPerHour
+            ? `at most ${global.startsPerHour} run starts an hour in the runtime`
+            : null
+      if (reason) {
+        this.globalSkipped += 1
+        return this.skip(scope, definition, reason)
+      }
+      this.globalStarts.push(now)
     }
     record.starts.push(now)
     const runId = runIdAt(now)
