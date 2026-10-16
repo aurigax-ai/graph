@@ -475,68 +475,41 @@ describe('workers and pairing', () => {
       cli.call('events.push', { scope, event: { type: 'worker-ready', kind: 'agent', scope } }),
     ).rejects.toThrow('reserved-event')
   })
-  it('GRF-C204 when the next worker answers lost, a step that never confirmed its start starts with its own input, and an agent that had started fails AgentGone', async () => {
+  it('GRF-C204 when the next worker answers lost, an agent step is interrupted and a command starts again as attempt 2 with its own input', async () => {
     const { paths } = runtimePlace()
     const runtime = await started(paths)
-    const folder = folderWith({ g: graph(AGENT), h: graph(AGENT) })
+    const folder = folderWith({
+      g: graph(AGENT),
+      c: graph('  - { id: a, kind: command, with: { run: [make, test] } }'),
+    })
     const panel = await track(pairedClient(runtime, 'panel', RIGHTS))
-    const scope = await enabled(panel, folder, ['g', 'h'])
+    const scope = await enabled(panel, folder, ['g', 'c'])
     const hanging = await track(pairedClient(runtime, 'hang', WORKER_RIGHTS))
     hanging.handle('worker.task', () => new Promise(() => {}))
     await hanging.call('scopes.register', { folder })
-    await hanging.call('worker.register', { kinds: ['agent'], scopes: [scope] })
-    const first = await panel.call<{ runId: string }>('runs.start', { scope, name: 'g' })
-    await until(async () => (await nodeStatus(panel, scope, first.runId, 'a')) === 'running')
+    await hanging.call('worker.register', { kinds: ['agent', 'command'], scopes: [scope] })
+    const agentRun = await panel.call<{ runId: string }>('runs.start', { scope, name: 'g' })
+    const commandRun = await panel.call<{ runId: string }>('runs.start', { scope, name: 'c' })
+    await until(async () => (await nodeStatus(panel, scope, commandRun.runId, 'a')) === 'running')
+    await until(async () => (await nodeStatus(panel, scope, agentRun.runId, 'a')) === 'running')
     hanging.close()
-    await until(async () => (await nodeStatus(panel, scope, first.runId, 'a')) === 'pending')
-    const state = hostState()
-    const tasks: WorkerTask[] = []
-    const lostKind = { ...fakeAgentKind(state), reattach: async () => 'lost' as const }
-    const next = await worker(
-      () => pairedClient(runtime, 'ostia', WORKER_RIGHTS),
-      folder,
-      [lostKind],
-      {
-        tasks,
-      },
-    )
-    await until(() => state.agents.length === 1)
-    expect(tasks.map((t) => t.op)).toEqual(['reattach', 'start'])
-    expect(state.agents[0]?.input).toMatchObject({ mode: 'start', agent: 'claude', prompt: 'p' })
-    next.c.close()
-
-    const resumes: string[] = []
-    const holding = {
-      ...fakeAgentKind(state),
-      resume: () => {
-        resumes.push('resume')
-        return new Promise<never>(() => {})
-      },
-    }
-    const holder = await worker(() => pairedClient(runtime, 'holder', WORKER_RIGHTS), folder, [
-      holding,
+    await until(async () => (await nodeStatus(panel, scope, commandRun.runId, 'a')) === 'pending')
+    const tasks: { op: string; kind: string; attempt: number; input: unknown }[] = []
+    const back = await track(pairedClient(runtime, 'ostia', WORKER_RIGHTS))
+    back.handle('worker.task', (raw) => {
+      const task = raw as WorkerTask
+      tasks.push({ op: task.op, kind: task.kind, attempt: task.run.attempt, input: task.input })
+      if (task.op === 'reattach') return { lost: true }
+      return { done: { exit: 0, stdout: '', stderr: '', timedOut: false, truncated: false } }
+    })
+    await back.call('scopes.register', { folder })
+    await back.call('worker.register', { kinds: ['agent', 'command'], scopes: [scope] })
+    await until(async () => (await status(panel, scope, agentRun.runId)) === 'interrupted')
+    await until(async () => (await status(panel, scope, commandRun.runId)) === 'done')
+    expect(tasks.filter((t) => t.kind === 'agent').map((t) => t.op)).toEqual(['reattach'])
+    expect(tasks.filter((t) => t.kind === 'command' && t.op === 'start')).toEqual([
+      { op: 'start', kind: 'command', attempt: 2, input: { run: ['make', 'test'] } },
     ])
-    const second = await panel.call<{ runId: string }>('runs.start', { scope, name: 'h' })
-    await until(() => state.agents.length === 2)
-    await holder.c.call('events.push', {
-      scope,
-      event: { type: 'agent-stop', pane: state.agents[1]?.pane },
-    })
-    await until(() => resumes.length === 1)
-    holder.c.close()
-    await until(async () => (await nodeStatus(panel, scope, second.runId, 'a')) === 'pending')
-    const after: WorkerTask[] = []
-    await worker(() => pairedClient(runtime, 'ostia', WORKER_RIGHTS), folder, [lostKind], {
-      tasks: after,
-    })
-    await until(async () => (await status(panel, scope, second.runId)) === 'failed')
-    expect(after.map((t) => t.op)).toEqual(['reattach'])
-    expect(state.agents).toHaveLength(2)
-    const run = await panel.call<{ summary: { failure?: { name: string } } }>('runs.show', {
-      scope,
-      runId: second.runId,
-    })
-    expect(run.summary.failure?.name).toBe('AgentGone')
   })
 
   it('GRF-C200 revoking a client whose token is a file removes the file and closes its live connection', async () => {
@@ -619,5 +592,32 @@ describe('workers and pairing', () => {
     expect(readFileSync(stale, 'utf8')).toBe('stale\n')
     for (const name of readdirSync(folder))
       if (name !== 'ostia') expect(readFileSync(join(folder, name), 'utf8')).not.toContain(token)
+  })
+  it('GRF-C204 a worker that comes back reattaches the waiting steps of its kinds once, and its pane gone interrupts a once agent', async () => {
+    const { paths } = runtimePlace()
+    const runtime = await started(paths)
+    const folder = folderWith({ g: graph(AGENT) })
+    const panel = await track(pairedClient(runtime, 'panel', RIGHTS))
+    const scope = await enabled(panel, folder, ['g'])
+    const state = hostState()
+    const first = await worker(() => pairedClient(runtime, 'ostia', WORKER_RIGHTS), folder, [
+      fakeAgentKind(state),
+    ])
+    const { runId } = await panel.call<{ runId: string }>('runs.start', { scope, name: 'g' })
+    await until(async () => (await nodeStatus(panel, scope, runId, 'a')) === 'waiting')
+    await first.c.call('worker.register', { kinds: ['agent'], scopes: [scope] })
+    await new Promise((r) => setTimeout(r, 100))
+    expect(journal(paths, scope, 'g', runId).filter((l) => l.type === 'reattach')).toEqual([])
+    first.c.close()
+    const tasks: WorkerTask[] = []
+    await worker(
+      () => pairedClient(runtime, 'ostia', WORKER_RIGHTS),
+      folder,
+      [{ ...fakeAgentKind(hostState()), reattach: async () => 'lost' as const }],
+      { tasks },
+    )
+    await until(async () => (await status(panel, scope, runId)) === 'interrupted')
+    expect(tasks.map((t) => t.op)).toEqual(['reattach'])
+    expect(journal(paths, scope, 'g', runId).filter((l) => l.type === 'reattach')).toHaveLength(1)
   })
 })

@@ -396,4 +396,16 @@ describe('triggers and limits in the runtime', () => {
       agents: 3,
     })
   })
+  it('GRF-C201 a files trigger in a folder with more folders than the runtime watches is listed as refused', async () => {
+    const { paths } = runtimePlace()
+    const runtime = await started(paths)
+    const folder = folderWith({ g: graph("  - { files: { glob: 'src/**' } }") })
+    for (let i = 0; i <= 5000; i++) mkdirSync(join(folder, 'src', `d${i}`))
+    const panel = await track(pairedClient(runtime, 'panel', RIGHTS))
+    const scope = await enabled(panel, folder, ['g'])
+    const listed = await panel.call<{ name: string; filesRefused?: boolean }[]>('graphs.list', {
+      scope,
+    })
+    expect(listed).toEqual([expect.objectContaining({ name: 'g', filesRefused: true })])
+  })
 })

@@ -39,7 +39,7 @@ export class WorkerPool {
 
   constructor(
     private readonly registry: Registry,
-    private readonly changed: (scopes: string[], kinds: string[]) => void,
+    private readonly changed: (added: { scope: string; kinds: string[] }[]) => void,
   ) {}
 
   register(session: Session, kinds: unknown, scopeKeys: string[]): { kinds: string[] } {
@@ -55,12 +55,18 @@ export class WorkerPool {
       if (others.length >= WORKERS_PER_SCOPE)
         throw new RpcError(`too-many-workers: at most ${WORKERS_PER_SCOPE} workers in a folder`)
     }
+    const before = this.workers.get(session.id)
     this.workers.set(session.id, {
       session,
       kinds: new Set(served),
       scopes: new Set(scopeKeys),
     })
-    this.changed(scopeKeys, served)
+    this.changed(
+      scopeKeys.map((scope) => ({
+        scope,
+        kinds: served.filter((k) => !(before?.scopes.has(scope) && before.kinds.has(k))),
+      })),
+    )
     return { kinds: served }
   }
 
@@ -68,7 +74,7 @@ export class WorkerPool {
     const worker = this.workers.get(session.id)
     if (!worker) return
     this.workers.delete(session.id)
-    this.changed([...worker.scopes], [])
+    this.changed([])
   }
 
   serves(kind: string, scopeKey: string): boolean {
@@ -179,28 +185,9 @@ export function workerKind(opts: WorkerKindOptions): NodeKind {
     return pending(kind, ctx, { ...what, input: ctx.input, ...(started ? { started } : {}) })
   }
 
-  const reattachThrough = async (wait: WorkerWait, ctx: NodeContext): Promise<NodeResult> => {
-    try {
-      const reply = await pool.task(kind, 'reattach', ctx, {
-        ...(wait.wait ? { wait: wait.wait } : {}),
-        ...(wait.started ? { started: wait.started } : {}),
-      })
-      if ('lost' in reply) {
-        if (wait.started && (ctx.node.once ?? descriptor.once))
-          throw new NodeError('AgentGone', `${ctx.run.node} was lost while its worker was away`)
-        return start(wait.input ?? ctx.input, ctx)
-      }
-      return result(reply)
-    } catch (err) {
-      if (!(err instanceof WorkerGone)) throw err
-      return pending(kind, ctx, wait)
-    }
-  }
-
   const resume = async (wait: NodeWait, event: Output, ctx: NodeContext): Promise<NodeResult> => {
     if (wait.on === 'worker') {
       if (wait.pending === 'start') return start(wait.input ?? ctx.input, ctx)
-      if (wait.pending === 'reattach') return reattachThrough(wait, ctx)
       return resume(wait.wait as NodeWait, wait.event ?? {}, ctx)
     }
     refuse(ctx)
@@ -222,7 +209,10 @@ export function workerKind(opts: WorkerKindOptions): NodeKind {
     wait: NodeWait | undefined,
     ctx: NodeContext,
   ): Promise<Reattached> => {
-    if (wait?.on === 'worker') return 'running'
+    if (wait?.on === 'worker') {
+      if (wait.pending !== 'reattach' || !pool.serves(kind, ctx.scope)) return 'running'
+      return reattach(wait.started, wait.wait, ctx)
+    }
     if (local(ctx)) return headless?.reattach ? headless.reattach(started, wait, ctx) : 'lost'
     try {
       const reply = await pool.task(kind, 'reattach', ctx, {
@@ -231,8 +221,10 @@ export function workerKind(opts: WorkerKindOptions): NodeKind {
       })
       if ('lost' in reply) return 'lost'
       if ('done' in reply) return { done: reply.done }
-      if ('waiting' in reply)
+      if ('waiting' in reply) {
+        if (wait && JSON.stringify(reply.waiting) === JSON.stringify(wait)) return 'running'
         return { waiting: reply.waiting, ...(reply.started ? { started: reply.started } : {}) }
+      }
       return 'lost'
     } catch (err) {
       if (!(err instanceof WorkerGone)) return 'lost'
