@@ -34,8 +34,15 @@ type Reply =
   | { error: { name: string; message: string } }
   | { ok: true }
 
+interface UnsentCancel {
+  kind: string
+  scope: string
+  params: Record<string, unknown>
+}
+
 export class WorkerPool {
   private readonly workers = new Map<number, Worker>()
+  private readonly unsentCancels = new Map<string, UnsentCancel>()
 
   constructor(
     private readonly registry: Registry,
@@ -61,6 +68,7 @@ export class WorkerPool {
       kinds: new Set(served),
       scopes: new Set(scopeKeys),
     })
+    this.sendUnsentCancels()
     this.changed(
       scopeKeys.map((scope) => ({
         scope,
@@ -68,6 +76,29 @@ export class WorkerPool {
       })),
     )
     return { kinds: served }
+  }
+
+  cancelWhenServed(kind: string, ctx: NodeContext, extra: Record<string, unknown>): void {
+    const worker = this.pick(kind, ctx.scope)
+    const params = this.params(kind, 'cancel', ctx, extra)
+    if (worker) {
+      void this.send(worker, params).catch(() => this.keepCancel(kind, ctx, params))
+      return
+    }
+    this.keepCancel(kind, ctx, params)
+  }
+
+  private keepCancel(kind: string, ctx: NodeContext, params: Record<string, unknown>): void {
+    this.unsentCancels.set(ctx.run.attemptKey, { kind, scope: ctx.scope, params })
+  }
+
+  private sendUnsentCancels(): void {
+    for (const [key, cancel] of this.unsentCancels) {
+      const worker = this.pick(cancel.kind, cancel.scope)
+      if (!worker) continue
+      this.unsentCancels.delete(key)
+      void this.send(worker, cancel.params).catch(() => this.unsentCancels.set(key, cancel))
+    }
   }
 
   drop(session: Session): void {
@@ -95,6 +126,36 @@ export class WorkerPool {
     }))
   }
 
+  private params(
+    kind: string,
+    op: Op,
+    ctx: NodeContext,
+    extra: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const scope = this.registry.byKey(ctx.scope)
+    return {
+      op,
+      kind,
+      scope: scope?.id ?? ctx.scope,
+      folder: scope?.folder ?? null,
+      run: ctx.run,
+      node: ctx.node,
+      trigger: ctx.trigger,
+      timeoutMs: ctx.timeoutMs,
+      history: ctx.history(),
+      input: ctx.input,
+      ...extra,
+    }
+  }
+
+  private async send(worker: Worker, params: Record<string, unknown>): Promise<unknown> {
+    try {
+      return await worker.session.request(TASK_METHOD, params)
+    } catch {
+      throw new WorkerGone('the worker went away')
+    }
+  }
+
   async task(
     kind: string,
     op: Op,
@@ -103,25 +164,7 @@ export class WorkerPool {
   ): Promise<Reply> {
     const worker = this.pick(kind, ctx.scope)
     if (!worker) throw new WorkerGone('no worker')
-    const scope = this.registry.byKey(ctx.scope)
-    let reply: unknown
-    try {
-      reply = await worker.session.request(TASK_METHOD, {
-        op,
-        kind,
-        scope: scope?.id ?? ctx.scope,
-        folder: scope?.folder ?? null,
-        run: ctx.run,
-        node: ctx.node,
-        trigger: ctx.trigger,
-        timeoutMs: ctx.timeoutMs,
-        history: ctx.history(),
-        input: ctx.input,
-        ...extra,
-      })
-    } catch {
-      throw new WorkerGone('the worker went away')
-    }
+    const reply = await this.send(worker, this.params(kind, op, ctx, extra))
     if (!isRecord(reply)) throw new NodeError('BadOutput', 'the worker answered nothing')
     return reply as Reply
   }
@@ -166,7 +209,7 @@ export function workerKind(opts: WorkerKindOptions): NodeKind {
   }
 
   const cancelling = (ctx: NodeContext): (() => void) => {
-    const cancel = (): void => void pool.task(kind, 'cancel', ctx, {}).catch(() => {})
+    const cancel = (): void => pool.cancelWhenServed(kind, ctx, {})
     ctx.signal.addEventListener('abort', cancel, { once: true })
     return () => ctx.signal.removeEventListener('abort', cancel)
   }
@@ -174,6 +217,7 @@ export function workerKind(opts: WorkerKindOptions): NodeKind {
   const start = async (input: Output, ctx: NodeContext): Promise<NodeResult> => {
     refuse(ctx)
     if (local(ctx)) return (headless as NodeKind).start(input, ctx)
+    if (ctx.signal.aborted) return pending(kind, ctx, { pending: 'start', input })
     const done = cancelling(ctx)
     try {
       return result(await pool.task(kind, 'start', ctx, { input }))
@@ -201,6 +245,7 @@ export function workerKind(opts: WorkerKindOptions): NodeKind {
     }
     refuse(ctx)
     if (local(ctx) && headless?.resume) return headless.resume(wait, event, ctx)
+    if (ctx.signal.aborted) return gone(ctx, { pending: 'resume', wait, event })
     const done = cancelling(ctx)
     try {
       return result(await pool.task(kind, 'resume', ctx, { wait, event }))
@@ -248,7 +293,14 @@ export function workerKind(opts: WorkerKindOptions): NodeKind {
   const quiet =
     (op: 'cancel' | 'rearm') =>
     async (wait: NodeWait | undefined, started: Output | undefined, ctx: NodeContext) => {
-      if (wait?.on === 'worker') return
+      if (wait?.on === 'worker') {
+        if (op === 'cancel' && wait.pending === 'reattach')
+          pool.cancelWhenServed(kind, ctx, {
+            ...(wait.wait ? { wait: wait.wait } : {}),
+            ...(wait.started ? { started: wait.started } : {}),
+          })
+        return
+      }
       if (local(ctx)) {
         await (op === 'cancel' ? headless?.cancel : headless?.rearm)?.(
           wait as NodeWait,
@@ -257,9 +309,9 @@ export function workerKind(opts: WorkerKindOptions): NodeKind {
         )
         return
       }
-      await pool
-        .task(kind, op, ctx, { ...(wait ? { wait } : {}), ...(started ? { started } : {}) })
-        .catch(() => {})
+      const extra = { ...(wait ? { wait } : {}), ...(started ? { started } : {}) }
+      if (op === 'cancel') pool.cancelWhenServed(kind, ctx, extra)
+      else await pool.task(kind, op, ctx, extra).catch(() => {})
     }
 
   return {
