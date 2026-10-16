@@ -7,12 +7,11 @@ import {
   openSync,
   readFileSync,
   readdirSync,
-  renameSync,
   rmSync,
-  writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
 import { ensurePrivateDir } from './paths.ts'
+import { writePrivate } from './privateFile.ts'
 
 export const RIGHTS = ['observe', 'start', 'control', 'ingest', 'worker', 'enable'] as const
 export type Right = (typeof RIGHTS)[number]
@@ -135,9 +134,7 @@ export class Tokens {
   }
 
   private save(): void {
-    const staged = `${this.file}.${process.pid}`
-    writeFileSync(staged, `${JSON.stringify(this.records, null, 2)}\n`, { mode: 0o600 })
-    renameSync(staged, this.file)
+    writePrivate(this.file, `${JSON.stringify(this.records, null, 2)}\n`)
   }
 
   issue(client: string, rights: readonly Right[]): string {
@@ -155,8 +152,7 @@ export class Tokens {
     const token = this.issue(CLI_CLIENT, CLI_RIGHTS)
     ensurePrivateDir(tokensFolder(this.data))
     const path = cliTokenPath(this.data)
-    writeFileSync(`${path}.${process.pid}`, `${token}\n`, { mode: 0o600 })
-    renameSync(`${path}.${process.pid}`, path)
+    writePrivate(path, `${token}\n`)
   }
 
   verify(token: unknown): { client: string; rights: Right[] } | null {
@@ -197,9 +193,7 @@ export function provisionToken(data: string, client: string, rights: readonly Ri
   ensurePrivateDir(tokensFolder(data))
   const token = randomBytes(32).toString('base64url')
   const path = join(tokensFolder(data), client)
-  const staged = `${path}.${process.pid}`
-  writeFileSync(staged, `${JSON.stringify({ token, rights: [...rights] })}\n`, { mode: 0o600 })
-  renameSync(staged, path)
+  writePrivate(path, `${JSON.stringify({ token, rights: [...rights] })}\n`)
   return token
 }
 

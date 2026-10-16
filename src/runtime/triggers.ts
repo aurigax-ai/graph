@@ -1,4 +1,4 @@
-import { readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Clock, Output } from '../engine/contract.ts'
 import { isRecord } from '../format/model.ts'
@@ -6,6 +6,7 @@ import { FolderWatcher, type WatchStart } from '../triggers/folderWatch.ts'
 import { type TriggerEvent, firedBy } from '../triggers/match.ts'
 import { PathBatch } from '../triggers/pathBatch.ts'
 import { type ScheduleMemory, TriggerScheduler } from '../triggers/scheduler.ts'
+import { writePrivate } from './privateFile.ts'
 import type { Listing, Scope } from './registry.ts'
 
 export const SCHEDULES_FILE = 'schedules.json'
@@ -46,9 +47,7 @@ function scheduleMemory(path: string): ScheduleMemory {
     last: (key) => marks[key],
     mark: (key, at) => {
       marks = { ...marks, [key]: at }
-      const staged = `${path}.${process.pid}`
-      writeFileSync(staged, `${JSON.stringify(marks)}\n`, { mode: 0o600 })
-      renameSync(staged, path)
+      writePrivate(path, `${JSON.stringify(marks)}\n`)
     },
   }
 }

@@ -64,7 +64,9 @@ own, so a client can say which runtime it met.
 | `graphs.enable` | `enable` | `{ scope, name, fingerprint }` | a graph |
 | `graphs.disable` | `enable` | `{ scope, name }` | a graph |
 | `runs.list` | `observe` | `{ scope }` | run summaries |
-| `runs.show` | `observe` | `{ scope, runId, node? }` | a run, node by node |
+| `runs.show` | `observe` | `{ scope, runId, node? }` | a run, node by node, with its `graph` |
+| `runs.waiting` | `observe` | `{ scope, event }` | `[{ runId, graph, node }]`, the steps that event would reach |
+| `runs.report` | `worker` | `{ scope, runId, node, valid }` | `{ ok }`, journals whether a report was valid |
 | `runs.start` | `start` | `{ scope, name, input?, inputs?, by? }` | `{ runId }` or `{ queued: true }` |
 | `runs.control` | `control` | `{ scope, runId, action, node? }` | `{ ok }` |
 | `runtime.ceilings` | `control` | `{ steps?, runsPerHour?, parallel?, agents?, timeMs? }` | the ceilings |
@@ -128,7 +130,8 @@ when it starts again, a schedule's `catchUp` decides whether a missed time fires
 graph's own limits, at most 16 runs are active and 240 runs start in an hour across the runtime;
 a start over either is `skipped`, naming the limit, and counted in `runtime.status`. A client
 with `control` sets ceilings no graph's own `limits` pass (`runtime.ceilings`, at most 500 steps,
-60 runs an hour, 8 in parallel, 24 agents and 168 hours); they are kept in `<data>/ceilings.json`
+60 runs an hour, 8 in parallel, 24 agents and 168 hours; a ceiling left out keeps its value, and
+each value is a whole number); they are kept in `<data>/ceilings.json`
 and apply also while that client is away.
 
 `mode` is `client` (the runtime exits 60 s after its last client leaves while no step is running

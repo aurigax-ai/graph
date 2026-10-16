@@ -380,4 +380,16 @@ describe('triggers and limits in the runtime', () => {
     expect(stoppedFires).toEqual([])
     expect(liveFires).toHaveLength(1)
   })
+  it('GRF-C212 ceilings refuse fractions, NaN and strings, and a ceiling left out keeps its value', async () => {
+    const { paths } = runtimePlace()
+    const runtime = await started(paths)
+    const panel = await track(pairedClient(runtime, 'panel', RIGHTS))
+    for (const steps of [1.5, Number.NaN, '3', -1])
+      await expect(panel.call('runtime.ceilings', { steps })).rejects.toThrow('bad-ceilings: steps')
+    await panel.call('runtime.ceilings', { steps: 2 })
+    expect(await panel.call('runtime.ceilings', { agents: 3 })).toMatchObject({
+      steps: 2,
+      agents: 3,
+    })
+  })
 })
