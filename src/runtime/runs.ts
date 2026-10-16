@@ -436,7 +436,13 @@ export class RuntimeRuns implements Part {
       isRecord(p.input) ? JSON.stringify(p.input) : undefined,
     )
     if (!input.ok) throw new RpcError(`${input.problem.code}: ${input.problem.message}`)
-    const trigger: Output = { kind: 'manual', by: byHuman ? 'human' : 'agent' }
+    const trigger: Output = {
+      kind: 'manual',
+      by: byHuman ? 'human' : 'agent',
+      ...(typeof p.pane === 'string' && p.pane.length > 0 && p.pane.length <= 128
+        ? { pane: p.pane }
+        : {}),
+    }
     const res = await this.engine.start(
       scope.key,
       {

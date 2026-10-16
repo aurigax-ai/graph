@@ -487,4 +487,25 @@ describe('the runtime registry and runs', () => {
     expect(journal().find((l) => l.type === 'node-end' && l.node === 'a')?.status).toBe('done')
     expect(journal().some((l) => l.type === 'node-start' && l.node === 'b')).toBe(false)
   })
+  it('GRF-C228 a start that names its pane puts the pane in the run trigger', async () => {
+    const { paths } = runtimePlace()
+    const runtime = await started(paths)
+    const folder = folderWith({ g: ROUTER })
+    const c = await host(runtime)
+    const scope = await enabled(c, folder, ['g'])
+    const { runId } = await c.call<{ runId: string }>('runs.start', {
+      scope,
+      name: 'g',
+      pane: 'pane-7',
+    })
+    const first = readFileSync(
+      join(paths.data, 'runs', scopeKey(scope), 'g', runId, 'journal.jsonl'),
+      'utf8',
+    ).split('\n')[0] as string
+    expect((JSON.parse(first) as { trigger: unknown }).trigger).toEqual({
+      kind: 'manual',
+      by: 'agent',
+      pane: 'pane-7',
+    })
+  })
 })
