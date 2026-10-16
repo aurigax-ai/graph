@@ -55,7 +55,7 @@ error has JSON-RPC code -32000.
 | Method | Right | Params | Result |
 |---|---|---|---|
 | `hello` | | `{ contract, token }` | `{ contract, version, pid, mode, client, rights }` |
-| `runtime.status` | `observe` | `{}` | `{ pid, version, contract, mode, clients }` |
+| `runtime.status` | `observe` | `{}` | `{ pid, version, contract, mode, clients, skipped, rateLimited }` |
 | `scopes.register` | `observe` | `{ folder, sandboxed?, scratch? }` | `{ scope, folder, sandboxed }` |
 | `graphs.load` | `observe` | `{ scope, path }` | a graph |
 | `graphs.unload` | `observe` | `{ scope, name }` | `{ ok }` |
@@ -67,7 +67,7 @@ error has JSON-RPC code -32000.
 | `runs.start` | `start` | `{ scope, name, input?, inputs?, by? }` | `{ runId }` or `{ queued: true }` |
 | `runs.control` | `control` | `{ scope, runId, action, node? }` | `{ ok }` |
 | `worker.register` | `worker` | `{ kinds, scopes }` | `{ kinds }` |
-| `events.push` | `ingest` | `{ scope, event }` | `{ matched }` |
+| `events.push` | `ingest` | `{ scope, event?, trigger? }` | `{ matched, fired }` |
 
 A scope is a real folder, `dir:<real path>`, the same for every client. `scopes.register` resolves
 the folder and refuses a scratch one (`scratch`); only a client with `worker` sets or clears its
@@ -109,7 +109,22 @@ step that never confirmed its start starts with its own input, an `agent` step t
 fails `AgentGone`, and any other step starts again with its own input.
 
 `events.push` delivers an event (`{ type, ... }`, such as an agent's stop or an answer) to the
-waiting steps of one of the client's scopes; `worker-ready` is the runtime's own.
+waiting steps of one of the client's scopes; `worker-ready` is the runtime's own. Its `trigger`,
+`{ kind: "command", pane, exitCode }` or `{ kind: "agent", pane, state: "stopped" | "waiting",
+agent? }`, starts the enabled graphs of that scope whose `command` or `agent` trigger it matches,
+except a graph whose own run opened the pane. A client sends at most 100 events a second; more
+are refused with `rate-limited` and counted in `runtime.status`.
+
+## Triggers and limits
+
+The runtime holds the one scheduler and trigger host for every enabled graph: `schedule`
+triggers (last times in `<data>/schedules.json`), `files` triggers (it watches the folder,
+following `.gitignore`, never `.git`, `node_modules` or a link, at most 5000 folders), and the
+`command` and `agent` triggers clients push. A graph is read again before a trigger starts it, so
+a changed graph never fires. A runtime that is not a daemon fires nothing while it is not running;
+when it starts again, a schedule's `catchUp` decides whether a missed time fires once. Besides each
+graph's own limits, at most 16 runs are active and 240 runs start in an hour across the runtime;
+a start over either is `skipped`, naming the limit, and counted in `runtime.status`.
 
 `mode` is `client` (the runtime exits 60 s after its last client leaves while no step is running
 or waiting on a timer) or `daemon` (started with `--daemon`; it runs until `wire runtime stop`).

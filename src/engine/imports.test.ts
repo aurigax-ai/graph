@@ -15,6 +15,7 @@ const ALLOWED_PACKAGES = [
   'ajv',
   '@marcbachmann/cel-js',
   'vscode-jsonrpc',
+  'ignore',
 ]
 
 function sources(dir: string): string[] {
@@ -50,6 +51,7 @@ describe('the engine package stands alone', () => {
     }
     expect(Object.keys(manifest.dependencies).sort()).toEqual([
       'croner',
+      'ignore',
       'picomatch',
       'vscode-jsonrpc',
       'yaml',

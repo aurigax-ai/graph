@@ -8,19 +8,38 @@ import { WORKER_READY } from '../engine/interpreter.ts'
 import type { Line, RunKey } from '../engine/journal.ts'
 import { isEnded } from '../engine/runState.ts'
 import { type RunSummary, runView } from '../engine/summary.ts'
-import { type GraphFile, isRecord, triggerKind } from '../format/model.ts'
+import { type GraphFile, TRIGGER_KINDS, isRecord, triggerKind } from '../format/model.ts'
 import { descriptorOf } from '../kinds/catalog.ts'
 import { commandNode } from '../kinds/command.ts'
 import { routerNode, waitNode } from '../kinds/smallKinds.ts'
+import type { TriggerEvent } from '../triggers/match.ts'
 import { type Listing, Registry, type Scope } from './registry.ts'
 import type { Part, Runtime } from './runtime.ts'
 import { RpcError, type Session } from './server.ts'
+import { type EnabledGraph, RuntimeTriggers } from './triggers.ts'
 import { WORKER_KINDS, WorkerPool, workerKind } from './workers.ts'
 
 export const RUNS_FOLDER = 'runs'
-export const RUNTIME_TRIGGERS = ['manual']
+export const RUNTIME_TRIGGERS = [...TRIGGER_KINDS]
+export const GLOBAL_LIMITS = { active: 16, startsPerHour: 240 }
+export const EVENTS_PER_SECOND = 100
 const CONTROL_ACTIONS = ['pause', 'resume', 'cancel', 'retry', 'rerun', 'skip', 'continue'] as const
 type ControlAction = (typeof CONTROL_ACTIONS)[number]
+
+function triggerEventOf(raw: unknown): TriggerEvent {
+  if (!isRecord(raw) || typeof raw.pane !== 'string' || raw.pane.length === 0)
+    throw new RpcError('bad-trigger')
+  if (raw.kind === 'command' && Number.isInteger(raw.exitCode))
+    return { kind: 'command', pane: raw.pane, exitCode: raw.exitCode as number }
+  if (raw.kind === 'agent' && (raw.state === 'stopped' || raw.state === 'waiting'))
+    return {
+      kind: 'agent',
+      pane: raw.pane,
+      state: raw.state,
+      ...(typeof raw.agent === 'string' ? { agent: raw.agent } : {}),
+    }
+  throw new RpcError('bad-trigger')
+}
 
 function params(raw: unknown): Record<string, unknown> {
   return isRecord(raw) ? raw : {}
@@ -57,6 +76,10 @@ export class RuntimeRuns implements Part {
   readonly registry: Registry
   readonly engine: Engine
   readonly workers: WorkerPool
+  readonly triggers: RuntimeTriggers
+  private readonly clock: Clock
+  private readonly pushes = new Map<number, number[]>()
+  private rateLimited = 0
   private readonly owned = new Map<number, Set<string>>()
   private readonly groups = new Set<number>()
 
@@ -100,10 +123,20 @@ export class RuntimeRuns implements Part {
       clock,
       notify: (notice) => this.notice(notice),
     }
+    this.clock = clock
     this.engine = new Engine({
       host,
       store: new FileJournalStore(join(runtime.paths.data, RUNS_FOLDER), () => clock.now()),
       changed: (runId, line) => this.changed(runId, line),
+      global: GLOBAL_LIMITS,
+    })
+    this.triggers = new RuntimeTriggers({
+      clock,
+      data: runtime.paths.data,
+      enabled: () => this.registry.enabled(),
+      fire: (graph, payload) => void this.fire(graph, payload).catch(() => {}),
+      changed: (scope) =>
+        this.runtime.server.broadcast('graph.changed', { scope: scope.id, name: null }),
     })
     this.register()
   }
@@ -121,7 +154,42 @@ export class RuntimeRuns implements Part {
     }
   }
 
+  status(): Record<string, unknown> {
+    return { skipped: this.engine.globalSkipped, rateLimited: this.rateLimited }
+  }
+
+  private async fire(graph: EnabledGraph, payload: Output): Promise<void> {
+    const listing = this.registry.listing(graph.scope, graph.listing.name)
+    if (listing.state !== 'enabled' || !listing.loaded) return
+    if (listing.loaded.fingerprint !== graph.listing.loaded?.fingerprint) return
+    await this.engine.start(
+      graph.scope.key,
+      { name: listing.name, graph: listing.loaded.graph, fingerprint: listing.loaded.fingerprint },
+      payload,
+      {},
+    )
+  }
+
+  private refreshTriggers(): void {
+    this.triggers.refresh()
+  }
+
+  private limitRate(session: Session): void {
+    const now = this.clock.now()
+    const recent = (this.pushes.get(session.id) ?? []).filter((t) => now - t < 1000)
+    if (recent.length >= EVENTS_PER_SECOND) {
+      this.rateLimited += 1
+      this.pushes.set(session.id, recent)
+      throw new RpcError(`rate-limited: at most ${EVENTS_PER_SECOND} events a second`)
+    }
+    if (!this.pushes.has(session.id))
+      this.runtime.server.onClose(session, () => this.pushes.delete(session.id))
+    recent.push(now)
+    this.pushes.set(session.id, recent)
+  }
+
   async drain(deadline: number): Promise<void> {
+    this.triggers.stop()
     this.engine.hold()
     while (this.engine.running() && Date.now() < deadline)
       await new Promise((r) => setTimeout(r, 50))
@@ -135,6 +203,13 @@ export class RuntimeRuns implements Part {
 
   async recover(): Promise<void> {
     for (const scope of this.registry.all()) await this.engine.recover(scope.key)
+    for (const run of this.engine.active())
+      for (const record of run.state.history.values()) {
+        const pane = record.started?.pane
+        if (typeof pane === 'string')
+          this.triggers.notePane(run.state.scope, run.state.graphName, pane)
+      }
+    this.refreshTriggers()
   }
 
   private scopeOfKey(key: string): string {
@@ -155,6 +230,9 @@ export class RuntimeRuns implements Part {
     const run = this.engine.run(runId)
     if (run) {
       const scope = this.scopeOfKey(run.state.scope)
+      const pane = line && 'started' in line ? line.started?.pane : undefined
+      if (typeof pane === 'string')
+        this.triggers.notePane(run.state.scope, run.state.graphName, pane)
       if (line && 'node' in line && line.type.startsWith('node-'))
         this.runtime.server.broadcast('node.changed', {
           scope,
@@ -173,6 +251,7 @@ export class RuntimeRuns implements Part {
   }
 
   private graphChanged(listing: Listing): void {
+    this.refreshTriggers()
     this.runtime.server.broadcast('graph.changed', {
       scope: listing.scope,
       name: listing.name,
@@ -209,6 +288,7 @@ export class RuntimeRuns implements Part {
       })
       this.ownedBy(session).add(scope.key)
       void this.engine.recover(scope.key).catch(() => {})
+      this.refreshTriggers()
       return { scope: scope.id, folder: scope.folder, sandboxed: scope.sandboxed }
     })
     server.method('graphs.load', 'observe', (raw, session) => {
@@ -221,6 +301,7 @@ export class RuntimeRuns implements Part {
       const p = params(raw)
       const scope = this.ownScope(session, p.scope)
       this.registry.unload(scope, p.name)
+      this.refreshTriggers()
       this.runtime.server.broadcast('graph.changed', { scope: scope.id, name: p.name, state: null })
       return { ok: true }
     })
@@ -270,10 +351,16 @@ export class RuntimeRuns implements Part {
     server.method('events.push', 'ingest', async (raw, session) => {
       const p = params(raw)
       const scope = this.ownScope(session, p.scope)
-      const event = p.event
-      if (!isRecord(event) || typeof event.type !== 'string') throw new RpcError('bad-event')
-      if (event.type === WORKER_READY) throw new RpcError('reserved-event')
-      return { matched: await this.engine.deliver(event as Output, scope.key) }
+      this.limitRate(session)
+      const event = p.event === undefined ? null : p.event
+      if (event !== null && (!isRecord(event) || typeof event.type !== 'string'))
+        throw new RpcError('bad-event')
+      if (event?.type === WORKER_READY) throw new RpcError('reserved-event')
+      const trigger = p.trigger === undefined ? null : triggerEventOf(p.trigger)
+      if (event === null && trigger === null) throw new RpcError('bad-event')
+      const matched = event ? await this.engine.deliver(event as Output, scope.key) : 0
+      const fired = trigger ? this.triggers.push(scope, trigger) : 0
+      return { matched, fired }
     })
     server.method('runs.start', 'start', (raw, session) => this.start(params(raw), session))
     server.method('runs.control', 'control', (raw) => this.control(params(raw)))

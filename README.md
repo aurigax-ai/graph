@@ -63,6 +63,9 @@ notices, connectors, and commands in the folders it serves. `serveKinds` from
 whose kind has no worker connected waits as `pending` without its timeout running, and starts
 when a worker registers; a step whose worker goes away is reattached through the next one.
 
+The runtime fires every enabled graph's triggers itself: schedules, files changed in the folder,
+and the command and agent events its host pushes, once each however many clients are connected.
+
 To keep it running across logins, install one of the documented files after putting your own two
 paths in it, the Node it runs on (`command -v node`) and the package's `dist/cli/bin.js`
 (`node -p "require.resolve('@aurigax-ai/wire/package.json').replace('package.json', 'dist/cli/bin.js')"`

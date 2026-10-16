@@ -35,6 +35,7 @@ export type StartOutcome =
 export interface Part {
   busy?: () => boolean
   drain?: (deadline: number) => Promise<void>
+  status?: () => Record<string, unknown>
 }
 
 export class Runtime {
@@ -80,6 +81,7 @@ export class Runtime {
       contract: RUNTIME_CONTRACT,
       mode: this.mode,
       clients: this.server.clients,
+      ...Object.assign({}, ...this.parts.map((p) => p.status?.() ?? {})),
     }
   }
 
