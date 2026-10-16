@@ -125,7 +125,8 @@ key. Registering the same kinds and folders again reattaches nothing.
 waiting steps of one of the client's scopes; `worker-ready` is the runtime's own. Its `trigger`,
 `{ kind: "command", pane, exitCode }` or `{ kind: "agent", pane, state: "stopped" | "waiting",
 agent? }`, starts the enabled graphs of that scope whose `command` or `agent` trigger it matches,
-except a graph whose own run opened the pane. A client sends at most 100 events a second; more
+except a graph one of whose runs opened the pane, ended runs and runs before a restart included
+(the runtime rebuilds this from every stored journal when it starts). A client sends at most 100 events a second; more
 are refused with `rate-limited` and counted in `runtime.status`.
 
 ## Triggers and limits

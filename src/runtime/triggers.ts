@@ -10,7 +10,6 @@ import { writePrivate } from './privateFile.ts'
 import type { Listing, Scope } from './registry.ts'
 
 export const SCHEDULES_FILE = 'schedules.json'
-export const PANES_KEPT = 256
 
 export interface EnabledGraph {
   scope: Scope
@@ -60,7 +59,7 @@ export class RuntimeTriggers {
   private readonly scheduler: TriggerScheduler
   private readonly watched = new Map<string, Watched>()
   private readonly refused = new Set<string>()
-  private readonly panes = new Map<string, string[]>()
+  private readonly panes = new Map<string, Set<string>>()
   private graphs: EnabledGraph[] = []
   private stopped = false
 
@@ -110,13 +109,13 @@ export class RuntimeTriggers {
 
   notePane(scopeKey: string, graph: string, pane: string): void {
     const key = `${scopeKey}/${graph}`
-    const list = (this.panes.get(key) ?? []).filter((p) => p !== pane)
-    list.push(pane)
-    this.panes.set(key, list.slice(-PANES_KEPT))
+    const known = this.panes.get(key) ?? new Set<string>()
+    known.add(pane)
+    this.panes.set(key, known)
   }
 
   ownPane(scopeKey: string, graph: string, pane: string): boolean {
-    return this.panes.get(`${scopeKey}/${graph}`)?.includes(pane) === true
+    return this.panes.get(`${scopeKey}/${graph}`)?.has(pane) === true
   }
 
   push(scope: Scope, event: TriggerEvent): number {

@@ -83,6 +83,7 @@ export class RuntimeRuns implements Part {
   private rateLimited = 0
   private readonly owned = new Map<number, Set<string>>()
   private readonly groups = new Set<number>()
+  private readonly store: FileJournalStore
 
   constructor(
     private readonly runtime: Runtime,
@@ -123,10 +124,11 @@ export class RuntimeRuns implements Part {
       notify: (notice) => this.notice(notice),
     }
     this.clock = clock
+    this.store = new FileJournalStore(join(runtime.paths.data, RUNS_FOLDER), () => clock.now())
     const saved = loadCeilings(runtime.paths.data)
     this.engine = new Engine({
       host,
-      store: new FileJournalStore(join(runtime.paths.data, RUNS_FOLDER), () => clock.now()),
+      store: this.store,
       changed: (runId, line) => this.changed(runId, line),
       global: GLOBAL_LIMITS,
       ...(saved ? { ceilings: saved } : {}),
@@ -205,12 +207,13 @@ export class RuntimeRuns implements Part {
 
   async recover(): Promise<void> {
     for (const scope of this.registry.all()) await this.engine.recover(scope.key)
-    for (const run of this.engine.active())
-      for (const record of run.state.history.values()) {
-        const pane = record.started?.pane
-        if (typeof pane === 'string')
-          this.triggers.notePane(run.state.scope, run.state.graphName, pane)
+    for (const key of await this.store.list()) {
+      const stored = await this.store.read(key)
+      for (const line of stored?.lines ?? []) {
+        const pane = 'started' in line ? line.started?.pane : undefined
+        if (typeof pane === 'string') this.triggers.notePane(key.scope, key.graph, pane)
       }
+    }
     this.refreshTriggers()
   }
 
