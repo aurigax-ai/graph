@@ -11,12 +11,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { FakeClock, fakeAgentKind, testEnv } from '../engine/fakeHost.ts'
-import type { RuntimeClient } from './client.ts'
+import { loadGraphText } from '../format/graphFile.ts'
+import { RuntimeCallError, RuntimeClient } from './client.ts'
 import type { RuntimePaths } from './paths.ts'
 import { scopeKey } from './registry.ts'
-import type { Runtime, RuntimeOptions } from './runtime.ts'
+import { PACKAGE_VERSION, type Runtime, type RuntimeOptions } from './runtime.ts'
 import { pairedClient, runtimePlace, testRuntime } from './testRuntime.ts'
-import { RIGHTS } from './tokens.ts'
+import { RIGHTS, readCliToken } from './tokens.ts'
+import { RuntimeTriggers } from './triggers.ts'
 import { serveKinds } from './workerClient.ts'
 
 const runtimes: Runtime[] = []
@@ -260,5 +262,122 @@ describe('triggers and limits in the runtime', () => {
     await minutes(clock, 5)
     await until(() => triggersOf(paths, scope, 'g').length === 1)
     expect(triggersOf(paths, scope, 'g')).toEqual(['schedule'])
+  })
+  it('GRF-C202 a trigger pushed without the ingest right is refused and starts nothing', async () => {
+    const { paths } = runtimePlace()
+    const runtime = await started(paths)
+    const folder = folderWith({ g: graph('  - { agent: { state: stopped } }') })
+    const panel = await track(pairedClient(runtime, 'panel', RIGHTS))
+    const scope = await enabled(panel, folder, ['g'])
+    const watcher = await track(pairedClient(runtime, 'watcher', ['observe']))
+    await watcher.call('scopes.register', { folder })
+    await expect(
+      watcher.call('events.push', {
+        scope,
+        trigger: { kind: 'agent', pane: 'p1', state: 'stopped' },
+      }),
+    ).rejects.toThrow('needs-right: ingest')
+    expect(triggersOf(paths, scope, 'g')).toEqual([])
+  })
+
+  it('GRF-C212 a control client sets ceilings that cap every graph, kept across a restart', async () => {
+    const { paths } = runtimePlace()
+    const runtime = await started(paths)
+    const panel = await track(pairedClient(runtime, 'panel', RIGHTS))
+    expect(
+      await panel.call('runtime.ceilings', {
+        steps: 2,
+        runsPerHour: 99,
+        parallel: 8,
+        agents: 0,
+        timeMs: 3_600_000,
+      }),
+    ).toEqual({ steps: 2, runsPerHour: 60, parallel: 8, agents: 0, timeMs: 3_600_000 })
+    await expect(panel.call('runtime.ceilings', { steps: 0 })).rejects.toThrow(
+      'bad-ceilings: steps',
+    )
+    const observer = await track(pairedClient(runtime, 'observer', ['observe']))
+    await expect(observer.call('runtime.ceilings', { steps: 9 })).rejects.toThrow(
+      'needs-right: control',
+    )
+    const folder = folderWith({
+      long: graph(
+        '  - { manual: {} }',
+        '  - { id: a, kind: router }\n  - { id: b, kind: router }\n  - { id: c, kind: router }',
+        'edges:\n  - { from: a, to: b }\n  - { from: b, to: c }',
+      ),
+    })
+    const scope = await enabled(panel, folder, ['long'])
+    const { runId } = await panel.call<{ runId: string }>('runs.start', {
+      scope,
+      name: 'long',
+      by: 'human',
+    })
+    await until(async () => {
+      const runs = await panel.call<{ runId: string; status: string }[]>('runs.list', { scope })
+      return runs.some((r) => r.runId === runId && r.status === 'step-limit')
+    })
+    panel.close()
+    await runtime.stop()
+    runtimes.splice(runtimes.indexOf(runtime), 1)
+    const again = await started(paths)
+    const back = await track(pairedClient(again, 'panel', RIGHTS))
+    await back.call('scopes.register', { folder })
+    const second = await back.call<{ runId: string }>('runs.start', {
+      scope,
+      name: 'long',
+      by: 'human',
+    })
+    await until(async () => {
+      const runs = await back.call<{ runId: string; status: string }[]>('runs.list', { scope })
+      return runs.some((r) => r.runId === second.runId && r.status === 'step-limit')
+    })
+  })
+
+  it('GRF-C227 a client of another contract is refused with the runtime own version and contract', async () => {
+    const { paths } = runtimePlace()
+    await started(paths)
+    const refused = await RuntimeClient.connect({
+      socket: paths.socket,
+      token: readCliToken(paths.data) ?? '',
+      contract: 2,
+    }).catch((err: unknown) => err)
+    expect(refused).toBeInstanceOf(RuntimeCallError)
+    expect((refused as RuntimeCallError).message).toBe('unsupported-contract')
+    expect((refused as RuntimeCallError).data).toEqual({ contract: 1, version: PACKAGE_VERSION })
+  })
+  it('GRF-C218 a trigger host stopped for a stop is not armed again by a later refresh', async () => {
+    const clock = new FakeClock(START)
+    const loaded = loadGraphText(graph('  - { schedule: { every: 5m } }'), '/x/graphs/g.yaml')
+    if (!loaded.ok) throw new Error('graph')
+    const scope = { key: 'dir-x', id: 'dir:/x', folder: '/x', sandboxed: false, graphs: {} }
+    const listing = {
+      scope: scope.id,
+      name: 'g',
+      path: '/x/graphs/g.yaml',
+      realPath: '/x/graphs/g.yaml',
+      state: 'enabled' as const,
+      loaded: loaded.value,
+      problems: [],
+    }
+    const host = (fired: unknown[]) =>
+      new RuntimeTriggers({
+        clock,
+        data: mkdtempSync(join(tmpdir(), 'wrt-triggers-')),
+        enabled: () => [{ scope, listing }],
+        fire: (_graph, payload) => fired.push(payload),
+        changed: () => {},
+      })
+    const stoppedFires: unknown[] = []
+    const stopped = host(stoppedFires)
+    stopped.stop()
+    stopped.refresh()
+    const liveFires: unknown[] = []
+    const live = host(liveFires)
+    live.refresh()
+    await minutes(clock, 6)
+    live.stop()
+    expect(stoppedFires).toEqual([])
+    expect(liveFires).toHaveLength(1)
   })
 })

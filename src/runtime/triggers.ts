@@ -63,6 +63,7 @@ export class RuntimeTriggers {
   private readonly refused = new Set<string>()
   private readonly panes = new Map<string, string[]>()
   private graphs: EnabledGraph[] = []
+  private stopped = false
 
   constructor(private readonly deps: TriggerDeps) {
     this.scheduler = new TriggerScheduler({
@@ -76,6 +77,7 @@ export class RuntimeTriggers {
   }
 
   refresh(): void {
+    if (this.stopped) return
     this.graphs = this.deps.enabled()
     this.scheduler.set(
       this.graphs.flatMap((g) =>
@@ -132,6 +134,7 @@ export class RuntimeTriggers {
   }
 
   stop(): void {
+    this.stopped = true
     this.scheduler.stop()
     for (const key of [...this.watched.keys()]) this.unwatch(key)
   }

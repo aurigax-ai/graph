@@ -13,6 +13,7 @@ import { descriptorOf } from '../kinds/catalog.ts'
 import { commandNode } from '../kinds/command.ts'
 import { routerNode, waitNode } from '../kinds/smallKinds.ts'
 import type { TriggerEvent } from '../triggers/match.ts'
+import { ceilingsOf, loadCeilings, saveCeilings } from './ceilings.ts'
 import { type Listing, Registry, type Scope } from './registry.ts'
 import type { Part, Runtime } from './runtime.ts'
 import { RpcError, type Session } from './server.ts'
@@ -124,11 +125,13 @@ export class RuntimeRuns implements Part {
       notify: (notice) => this.notice(notice),
     }
     this.clock = clock
+    const saved = loadCeilings(runtime.paths.data)
     this.engine = new Engine({
       host,
       store: new FileJournalStore(join(runtime.paths.data, RUNS_FOLDER), () => clock.now()),
       changed: (runId, line) => this.changed(runId, line),
       global: GLOBAL_LIMITS,
+      ...(saved ? { ceilings: saved } : {}),
     })
     this.triggers = new RuntimeTriggers({
       clock,
@@ -364,6 +367,12 @@ export class RuntimeRuns implements Part {
     })
     server.method('runs.start', 'start', (raw, session) => this.start(params(raw), session))
     server.method('runs.control', 'control', (raw) => this.control(params(raw)))
+    server.method('runtime.ceilings', 'control', (raw) => {
+      const ceilings = ceilingsOf(raw)
+      this.engine.ceilings = ceilings
+      saveCeilings(this.runtime.paths.data, ceilings)
+      return ceilings
+    })
   }
 
   private problem(listing: Listing): string | null {

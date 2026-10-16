@@ -51,6 +51,7 @@ export interface ServerOptions {
   clientsChanged: (count: number) => void
   maxClients?: number
   helloTimeoutMs?: number
+  version?: string
 }
 
 class ClosingWriter extends SocketMessageWriter {
@@ -132,15 +133,19 @@ export class RuntimeServer {
       this.opts.clientsChanged(this.sessions.size)
     })
     connection.onError(() => socket.destroy())
-    const refuse = (code: string) => {
+    const refuse = (code: string, data?: Record<string, unknown>) => {
       writer.closing = true
-      return fail(code)
+      return data ? new ResponseError(APP_ERROR, code, data) : fail(code)
     }
     connection.onRequest(async (method: string, params: unknown) => {
       if (method === 'hello') {
         if (session) return fail('already-hello')
         const hello = (params ?? {}) as { contract?: unknown; token?: unknown }
-        if (hello.contract !== RUNTIME_CONTRACT) return refuse('unsupported-contract')
+        if (hello.contract !== RUNTIME_CONTRACT)
+          return refuse('unsupported-contract', {
+            contract: RUNTIME_CONTRACT,
+            ...(this.opts.version ? { version: this.opts.version } : {}),
+          })
         const verified = this.opts.tokens.verify(hello.token)
         if (!verified) return refuse('unauthorized')
         if (this.sessions.size >= (this.opts.maxClients ?? MAX_CLIENTS))

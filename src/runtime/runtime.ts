@@ -70,6 +70,7 @@ export class Runtime {
         rights: [...session.rights],
       }),
       clientsChanged: () => this.touch(),
+      version: PACKAGE_VERSION,
     })
     this.server.method('runtime.status', 'observe', () => this.status())
   }

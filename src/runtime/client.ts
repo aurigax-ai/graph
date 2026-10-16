@@ -10,7 +10,14 @@ import { RUNTIME_CONTRACT } from './server.ts'
 
 export const START_WAIT_MS = 5_000
 
-export class RuntimeCallError extends Error {}
+export class RuntimeCallError extends Error {
+  constructor(
+    message: string,
+    readonly data?: unknown,
+  ) {
+    super(message)
+  }
+}
 
 export interface Hello {
   contract: number
@@ -39,7 +46,7 @@ function open(path: string): Promise<Socket> {
 }
 
 function callError(err: unknown): unknown {
-  return err instanceof ResponseError ? new RuntimeCallError(err.message) : err
+  return err instanceof ResponseError ? new RuntimeCallError(err.message, err.data) : err
 }
 
 function untilClosed<T>(closed: Promise<void>, request: Promise<T>): Promise<T> {
