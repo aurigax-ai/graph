@@ -14,15 +14,17 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { NodeKind } from '../engine/contract.ts'
+import type { KindDescriptor, NodeContext, NodeKind } from '../engine/contract.ts'
 import { type FakeHostState, fakeAgentKind, fakeApprovalKind, testEnv } from '../engine/fakeHost.ts'
 import { RuntimeClient } from './client.ts'
 import type { RuntimePaths } from './paths.ts'
-import { scopeKey } from './registry.ts'
+import { type Registry, scopeKey } from './registry.ts'
 import type { Runtime, RuntimeOptions } from './runtime.ts'
+import type { Session } from './server.ts'
 import { cliClient, pairedClient, runtimePlace, testRuntime } from './testRuntime.ts'
 import { RIGHTS, type Right, Tokens, provisionToken, readProvisionedToken } from './tokens.ts'
 import { type WorkerTask, serveKinds } from './workerClient.ts'
+import { WorkerPool, workerKind } from './workers.ts'
 
 const BIN = join(import.meta.dirname, '..', '..', 'dist', 'cli', 'bin.js')
 const children: ChildProcess[] = []
@@ -619,5 +621,105 @@ describe('workers and pairing', () => {
     await until(async () => (await status(panel, scope, runId)) === 'interrupted')
     expect(tasks.map((t) => t.op)).toEqual(['reattach'])
     expect(journal(paths, scope, 'g', runId).filter((l) => l.type === 'reattach')).toHaveLength(1)
+  })
+  it('GRF-C203 cancelling a run cancels the step its worker is running, by the same attempt key', async () => {
+    const { paths } = runtimePlace()
+    const runtime = await started(paths)
+    const folder = folderWith({
+      c: graph('  - { id: a, kind: command, with: { run: [sleep, "60"] } }'),
+    })
+    const panel = await track(pairedClient(runtime, 'panel', RIGHTS))
+    const scope = await enabled(panel, folder, ['c'])
+    const seen: { op: string; key: string }[] = []
+    const ostia = await track(pairedClient(runtime, 'ostia', WORKER_RIGHTS))
+    ostia.handle('worker.task', (raw) => {
+      const task = raw as WorkerTask
+      seen.push({ op: task.op, key: task.run.attemptKey })
+      if (task.op === 'start') return new Promise(() => {})
+      return { ok: true }
+    })
+    await ostia.call('scopes.register', { folder })
+    await ostia.call('worker.register', { kinds: ['command'], scopes: [scope] })
+    const { runId } = await panel.call<{ runId: string }>('runs.start', { scope, name: 'c' })
+    await until(() => seen.some((t) => t.op === 'start'))
+    expect(await panel.call('runs.control', { scope, runId, action: 'cancel' })).toEqual({
+      ok: true,
+    })
+    await until(() => seen.some((t) => t.op === 'cancel'))
+    const start = seen.find((t) => t.op === 'start')
+    expect(seen.find((t) => t.op === 'cancel')?.key).toBe(start?.key)
+    expect(await status(panel, scope, runId)).toBe('cancelled')
+  })
+
+  it('GRF-C203 a step whose signal was already aborted is never sent to its worker', async () => {
+    const sent: string[] = []
+    const session = {
+      id: 1,
+      client: 'ostia',
+      request: async (_method: string, params: { op: string }) => {
+        sent.push(params.op)
+        return { done: {} }
+      },
+    } as unknown as Session
+    const pool = new WorkerPool({ byKey: () => undefined } as unknown as Registry, () => {})
+    pool.register(session, ['command'], ['k1'])
+    const kind = workerKind({
+      descriptor: { kind: 'command', version: 1 } as KindDescriptor,
+      pool,
+      sandboxed: () => false,
+    })
+    const abort = new AbortController()
+    abort.abort()
+    const ctx = {
+      scope: 'k1',
+      run: { attemptKey: 'a1', runId: 'r1', graph: 'g', node: 'a' },
+      node: { id: 'a', kind: 'command' },
+      signal: abort.signal,
+      history: () => [],
+      started: () => undefined,
+      input: {},
+    } as unknown as NodeContext
+    await kind.start({}, ctx)
+    await kind.resume?.({ on: 'human', ask: {} }, {}, ctx)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(sent).toEqual([])
+  })
+
+  it('GRF-C203 a step cancelled while its worker was gone is cancelled at the next worker that registers, by the same attempt key', async () => {
+    const { paths } = runtimePlace()
+    const runtime = await started(paths)
+    const folder = folderWith({
+      c: graph('  - { id: a, kind: command, with: { run: [sleep, "60"] } }'),
+    })
+    const panel = await track(pairedClient(runtime, 'panel', RIGHTS))
+    const scope = await enabled(panel, folder, ['c'])
+    const first: { op: string; key: string }[] = []
+    const gone = await track(pairedClient(runtime, 'ostia', WORKER_RIGHTS))
+    gone.handle('worker.task', (raw) => {
+      const task = raw as WorkerTask
+      first.push({ op: task.op, key: task.run.attemptKey })
+      return new Promise(() => {})
+    })
+    await gone.call('scopes.register', { folder })
+    await gone.call('worker.register', { kinds: ['command'], scopes: [scope] })
+    const { runId } = await panel.call<{ runId: string }>('runs.start', { scope, name: 'c' })
+    await until(() => first.some((t) => t.op === 'start'))
+    gone.close()
+    await until(async () => (await nodeStatus(panel, scope, runId, 'a')) === 'pending')
+    expect(await panel.call('runs.control', { scope, runId, action: 'cancel' })).toEqual({
+      ok: true,
+    })
+    await until(async () => (await status(panel, scope, runId)) === 'cancelled')
+    const next: { op: string; key: string }[] = []
+    const back = await track(pairedClient(runtime, 'ostia', WORKER_RIGHTS))
+    back.handle('worker.task', (raw) => {
+      const task = raw as WorkerTask
+      next.push({ op: task.op, key: task.run.attemptKey })
+      return { ok: true }
+    })
+    await back.call('scopes.register', { folder })
+    await back.call('worker.register', { kinds: ['command'], scopes: [scope] })
+    await until(() => next.some((t) => t.op === 'cancel'))
+    expect(next).toEqual([{ op: 'cancel', key: first[0]?.key }])
   })
 })

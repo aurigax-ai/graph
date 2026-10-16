@@ -379,4 +379,90 @@ describe('the runtime process', () => {
     expect(await c.call('runtime.status')).toMatchObject({ pid: first.pid, mode: 'daemon' })
     c.close()
   })
+  it('GRF-C192 a runtime on another data folder whose socket another runtime holds refuses to start and leaves that runtime answering', async () => {
+    const first = place()
+    await inProcess(first.paths)
+    const other = place()
+    const shared = { ...other.paths, socketDir: first.paths.socketDir, socket: first.paths.socket }
+    expect(await startRuntime({ paths: shared })).toMatchObject({
+      ok: false,
+      error: 'socket-in-use',
+    })
+    expect(await answers(first.paths)).toBe(true)
+    expect(await lockHeld(other.paths.data)).toBe(false)
+  })
+  it.runIf(process.platform === 'linux')(
+    'GRF-C192 a socket whose owner cannot take a connection now (EAGAIN) is left alone and the start is refused',
+    async () => {
+      const { paths } = place()
+      mkdirSync(paths.socketDir, { recursive: true, mode: 0o700 })
+      const owner = spawn(
+        process.execPath,
+        [
+          '-e',
+          `require('node:net').createServer(() => {}).listen({ path: process.argv[1], backlog: 1 }, () => process.stdout.write('ready'))`,
+          paths.socket,
+        ],
+        { stdio: ['ignore', 'pipe', 'inherit'] },
+      )
+      children.push(owner)
+      await new Promise((resolve) => owner.stdout?.once('data', resolve))
+      owner.kill('SIGSTOP')
+      const held: ReturnType<typeof connect>[] = []
+      try {
+        let full = false
+        for (let i = 0; i < 64 && !full; i++) {
+          const sock = connect(paths.socket)
+          held.push(sock)
+          full = await new Promise<boolean>((resolve) => {
+            sock.once('connect', () => resolve(false))
+            sock.once('error', (err: NodeJS.ErrnoException) => resolve(err.code === 'EAGAIN'))
+          })
+        }
+        expect(full).toBe(true)
+        const inode = statSync(paths.socket).ino
+        const refused = await startRuntime({ paths })
+        expect(refused).toMatchObject({ ok: false, error: 'socket-in-use' })
+        expect((refused as { message: string }).message).toContain('EAGAIN')
+        expect(statSync(paths.socket).ino).toBe(inode)
+        expect(await lockHeld(paths.data)).toBe(false)
+      } finally {
+        for (const sock of held) sock.destroy()
+        owner.kill('SIGCONT')
+      }
+    },
+  )
+  it('GRF-C192 two runtimes on different data folders starting at once on one socket leave exactly one, and it answers', async () => {
+    const a = place()
+    const b = place()
+    const shared = { ...b.paths, socketDir: a.paths.socketDir, socket: a.paths.socket }
+    const outcomes = await Promise.all([
+      startRuntime({ paths: a.paths }),
+      startRuntime({ paths: shared }),
+    ])
+    for (const o of outcomes) if (o.ok) runtimes.push(o.runtime)
+    expect(outcomes.filter((o) => o.ok)).toHaveLength(1)
+    expect(outcomes.find((o) => !o.ok)).toMatchObject({ ok: false, error: 'socket-in-use' })
+    const c = await client(
+      a.paths,
+      undefined,
+      readCliToken((outcomes.find((o) => o.ok) as { runtime: Runtime }).runtime.paths.data) ?? '',
+    )
+    expect(await c.call('runtime.status')).toMatchObject({ pid: process.pid })
+    c.close()
+  })
+  it('GRF-C191 on a fresh install status says nothing runs and start starts a runtime', async () => {
+    const { env, paths } = place()
+    const status = await output(wire(env, ['runtime', 'status']))
+    expect(status.code).toBe(0)
+    expect(JSON.parse(status.stdout)).toEqual({ running: false })
+    const started = await output(wire(env, ['runtime', 'start']))
+    expect(started.code).toBe(0)
+    const { pid } = JSON.parse(started.stdout) as { pid: number }
+    try {
+      expect(await answers(paths)).toBe(true)
+    } finally {
+      process.kill(pid, 'SIGKILL')
+    }
+  })
 })

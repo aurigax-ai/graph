@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
+import { connect } from 'node:net'
 import type { Clock } from '../engine/contract.ts'
-import { acquireLock } from './lock.ts'
+import { acquireLock, acquireSocketLock } from './lock.ts'
 import { PathRefusal, type RuntimePaths, ensurePrivateDir, runtimePaths } from './paths.ts'
 import { RuntimeRuns } from './runs.ts'
 import { RUNTIME_CONTRACT, RuntimeServer } from './server.ts'
@@ -8,6 +9,7 @@ import { Tokens } from './tokens.ts'
 
 export const IDLE_MS = 60_000
 export const DRAIN_MS = 10_000
+export const PROBE_MS = 1_000
 export const PROCESS_TITLE = 'wire-runtime'
 
 export type Mode = 'client' | 'daemon'
@@ -27,6 +29,7 @@ export interface RuntimeOptions {
   paths?: RuntimePaths
   daemon?: boolean
   idleMs?: number
+  probeMs?: number
   drainMs?: number
   clock?: Clock
   log?: (line: string) => void
@@ -36,6 +39,7 @@ export type StartOutcome =
   | { ok: true; runtime: Runtime }
   | { ok: false; error: 'already-running'; pid: number | null }
   | { ok: false; error: 'unsafe-folder'; message: string }
+  | { ok: false; error: 'socket-in-use'; message: string }
 
 export interface Part {
   busy?: () => boolean
@@ -132,6 +136,33 @@ export class Runtime {
   }
 }
 
+type SocketVerdict = 'answers' | 'dead' | 'unknown'
+
+const DEAD_SOCKET = new Set(['ECONNREFUSED', 'ENOENT'])
+
+function probeSocket(
+  socket: string,
+  ms: number,
+): Promise<{ verdict: SocketVerdict; why?: string }> {
+  return new Promise((resolve) => {
+    const probe = connect(socket)
+    const timer = setTimeout(() => {
+      probe.destroy()
+      resolve({ verdict: 'unknown', why: `no answer within ${ms} ms` })
+    }, ms)
+    probe.once('connect', () => {
+      clearTimeout(timer)
+      probe.destroy()
+      resolve({ verdict: 'answers' })
+    })
+    probe.once('error', (err: NodeJS.ErrnoException) => {
+      clearTimeout(timer)
+      const code = err.code ?? 'unknown error'
+      resolve(DEAD_SOCKET.has(code) ? { verdict: 'dead' } : { verdict: 'unknown', why: code })
+    })
+  })
+}
+
 export async function startRuntime(opts: RuntimeOptions = {}): Promise<StartOutcome> {
   const paths = opts.paths ?? runtimePaths()
   try {
@@ -144,15 +175,40 @@ export async function startRuntime(opts: RuntimeOptions = {}): Promise<StartOutc
   }
   const lock = await acquireLock(paths.data)
   if (!lock.ok) return { ok: false, error: 'already-running', pid: lock.pid }
+  const socketLock = await acquireSocketLock(paths.socketDir)
+  if (!socketLock.ok) {
+    lock.release()
+    return {
+      ok: false,
+      error: 'socket-in-use',
+      message: `another runtime holds ${paths.socket}`,
+    }
+  }
+  const release = () => {
+    socketLock.release()
+    lock.release()
+  }
+  const probe = await probeSocket(paths.socket, opts.probeMs ?? PROBE_MS)
+  if (probe.verdict !== 'dead') {
+    release()
+    return {
+      ok: false,
+      error: 'socket-in-use',
+      message:
+        probe.verdict === 'answers'
+          ? `another runtime answers on ${paths.socket}`
+          : `${paths.socket} may belong to a live runtime (${probe.why}); it was left alone`,
+    }
+  }
   let runtime: Runtime
   try {
-    runtime = new Runtime(paths, lock.release, opts)
+    runtime = new Runtime(paths, release, opts)
     const runs = new RuntimeRuns(runtime, opts.clock)
     runtime.add(runs)
     await runs.recover()
     await runtime.server.listen(paths.socket)
   } catch (err) {
-    lock.release()
+    release()
     throw err
   }
   runtime.touch()
