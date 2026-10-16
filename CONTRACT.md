@@ -125,7 +125,11 @@ key. Registering the same kinds and folders again reattaches nothing.
 waiting steps of one of the client's scopes; `worker-ready` is the runtime's own. Its `trigger`,
 `{ kind: "command", pane, exitCode }` or `{ kind: "agent", pane, state: "stopped" | "waiting",
 agent? }`, starts the enabled graphs of that scope whose `command` or `agent` trigger it matches,
-except a graph whose own run opened the pane. A client sends at most 100 events a second; more
+except a graph one of whose runs opened the pane. The runtime keeps, for each graph of each
+scope, every pane id its runs opened in `owned-panes.json` (0600), written when a pane is first
+noted and read at start; it never drops one, also after the store prunes the run's journal, an
+upgrade or a restart (journals from before this file are read into it at start). An id that is
+kept although its pane is gone can only keep a trigger from firing, never make one fire. A client sends at most 100 events a second; more
 are refused with `rate-limited` and counted in `runtime.status`.
 
 ## Triggers and limits

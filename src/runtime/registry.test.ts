@@ -1,9 +1,11 @@
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -251,6 +253,43 @@ describe('the runtime registry and runs', () => {
     expect(await state()).toBe('changed')
     writeFileSync(join(folder, 'graphs', 'g.yaml'), ROUTER)
     expect(await state()).toBe('changed')
+  })
+
+  it('GRF-C87 a ui key with any text stays out of the run: its journal and stored definition hold none of it', async () => {
+    const { paths } = runtimePlace()
+    const runtime = await started(paths)
+    const marker = 'ui-only-note-7f3a'
+    const folder = folderWith({ g: `${ROUTER}ui: { note: ${marker}, positions: { a: [1, 2] } }\n` })
+    const c = await host(runtime)
+    const scope = await enabled(c, folder, ['g'])
+    const { runId } = await c.call<{ runId: string }>('runs.start', {
+      scope,
+      name: 'g',
+      by: 'human',
+    })
+    await until(async () => {
+      const runs = await c.call<{ runId: string; status: string }[]>('runs.list', { scope })
+      return runs.find((r) => r.runId === runId)?.status === 'done'
+    })
+    const runFolder = join(paths.data, 'runs', scopeKey(scope), 'g', runId)
+    for (const name of readdirSync(runFolder))
+      expect(readFileSync(join(runFolder, name), 'utf8')).not.toContain(marker)
+  })
+
+  it('GRF-C86 a copy of an enabled graph under another name is not enabled, and the original stays enabled', async () => {
+    const { paths } = runtimePlace()
+    const runtime = await started(paths)
+    const folder = folderWith({ g: ROUTER })
+    const c = await host(runtime)
+    const scope = await enabled(c, folder, ['g'])
+    copyFileSync(join(folder, 'graphs', 'g.yaml'), join(folder, 'graphs', 'other.yaml'))
+    expect(
+      await c.call('graphs.load', { scope, path: join(folder, 'graphs', 'other.yaml') }),
+    ).toMatchObject({ name: 'other', state: 'not-enabled' })
+    const states = (await c.call<{ name: string; state: string }[]>('graphs.list', { scope }))
+      .map((g) => `${g.name}:${g.state}`)
+      .sort()
+    expect(states).toEqual(['g:enabled', 'other:not-enabled'])
   })
 
   it('GRF-C196 enable without the right, with a fingerprint that is not the file, and a scratch folder are refused and nothing is enabled', async () => {

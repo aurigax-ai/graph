@@ -10,7 +10,7 @@ import { writePrivate } from './privateFile.ts'
 import type { Listing, Scope } from './registry.ts'
 
 export const SCHEDULES_FILE = 'schedules.json'
-export const PANES_KEPT = 256
+export const OWNED_PANES_FILE = 'owned-panes.json'
 
 export interface EnabledGraph {
   scope: Scope
@@ -52,6 +52,18 @@ function scheduleMemory(path: string): ScheduleMemory {
   }
 }
 
+function ownedPanes(path: string): Map<string, Set<string>> {
+  const owned = new Map<string, Set<string>>()
+  try {
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as unknown
+    if (isRecord(raw))
+      for (const [key, panes] of Object.entries(raw))
+        if (Array.isArray(panes))
+          owned.set(key, new Set(panes.filter((p): p is string => typeof p === 'string')))
+  } catch {}
+  return owned
+}
+
 function keyOf(graph: EnabledGraph): string {
   return `${graph.scope.key}/${graph.listing.name}/${graph.listing.loaded?.fingerprint ?? ''}`
 }
@@ -60,11 +72,14 @@ export class RuntimeTriggers {
   private readonly scheduler: TriggerScheduler
   private readonly watched = new Map<string, Watched>()
   private readonly refused = new Set<string>()
-  private readonly panes = new Map<string, string[]>()
+  private readonly panes: Map<string, Set<string>>
+  private readonly panesFile: string
   private graphs: EnabledGraph[] = []
   private stopped = false
 
   constructor(private readonly deps: TriggerDeps) {
+    this.panesFile = join(deps.data, OWNED_PANES_FILE)
+    this.panes = ownedPanes(this.panesFile)
     this.scheduler = new TriggerScheduler({
       clock: deps.clock,
       memory: scheduleMemory(join(deps.data, SCHEDULES_FILE)),
@@ -110,13 +125,18 @@ export class RuntimeTriggers {
 
   notePane(scopeKey: string, graph: string, pane: string): void {
     const key = `${scopeKey}/${graph}`
-    const list = (this.panes.get(key) ?? []).filter((p) => p !== pane)
-    list.push(pane)
-    this.panes.set(key, list.slice(-PANES_KEPT))
+    const known = this.panes.get(key) ?? new Set<string>()
+    if (known.has(pane)) return
+    known.add(pane)
+    this.panes.set(key, known)
+    writePrivate(
+      this.panesFile,
+      `${JSON.stringify(Object.fromEntries([...this.panes].map(([k, v]) => [k, [...v]])))}\n`,
+    )
   }
 
   ownPane(scopeKey: string, graph: string, pane: string): boolean {
-    return this.panes.get(`${scopeKey}/${graph}`)?.includes(pane) === true
+    return this.panes.get(`${scopeKey}/${graph}`)?.has(pane) === true
   }
 
   push(scope: Scope, event: TriggerEvent): number {

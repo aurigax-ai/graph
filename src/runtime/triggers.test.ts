@@ -5,6 +5,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -123,8 +124,9 @@ describe('triggers and limits in the runtime', () => {
     await minutes(clock, 16)
     expect(triggersOf(paths, scope, 'g')).toEqual(['schedule', 'schedule', 'schedule'])
 
+    const armed = clock.pending()
     writeFileSync(join(folder, 'src', 'a.ts'), 'x')
-    await new Promise((r) => setTimeout(r, 300))
+    await until(() => clock.pending() > armed)
     await clock.advance(1_500)
     await until(() => triggersOf(paths, scope, 'g').length === 4)
     expect(
@@ -182,6 +184,179 @@ describe('triggers and limits in the runtime', () => {
     ).toEqual({ matched: 0, fired: 1 })
     await until(() => triggersOf(paths, scope, 'own').length === 2)
     expect(triggersOf(paths, scope, 'own')).toEqual(['agent', 'manual'])
+  })
+
+  it('GRF-C202 after a restart the panes the graph own runs opened, ended runs included, still start no run', async () => {
+    const { paths } = runtimePlace()
+    const first = await started(paths)
+    const folder = folderWith({
+      own: graph(
+        '  - { manual: {} }\n  - { agent: { state: stopped } }',
+        '  - { id: a, kind: agent, with: { mode: start, agent: claude, prompt: p } }',
+      ),
+    })
+    const panel = await track(pairedClient(first, 'panel', RIGHTS))
+    const scope = await enabled(panel, folder, ['own'])
+    const state = testEnv()
+    const ostia = await track(pairedClient(first, 'ostia', ['observe', 'worker', 'ingest']))
+    serveKinds(ostia, [fakeAgentKind(state)], 'ostia')
+    await ostia.call('scopes.register', { folder })
+    await ostia.call('worker.register', { kinds: ['agent'], scopes: [scope] })
+    await panel.call('runs.start', { scope, name: 'own', by: 'human' })
+    await until(() => state.agents.length === 1)
+    const pane = state.agents[0]?.pane as string
+    await until(async () => {
+      const runs = await panel.call<{ status: string }[]>('runs.list', { scope })
+      return runs[0]?.status === 'waiting'
+    })
+    await ostia.call('events.push', { scope, event: { type: 'agent-stop', pane } })
+    await until(async () => {
+      const runs = await panel.call<{ status: string }[]>('runs.list', { scope })
+      return runs[0]?.status === 'done'
+    })
+    panel.close()
+    ostia.close()
+    await first.stop()
+    runtimes.splice(runtimes.indexOf(first), 1)
+
+    const second = await started(paths)
+    const again = await track(pairedClient(second, 'ostia', ['observe', 'worker', 'ingest']))
+    await again.call('scopes.register', { folder })
+    expect(
+      await again.call('events.push', {
+        scope,
+        trigger: { kind: 'agent', pane, state: 'stopped' },
+      }),
+    ).toEqual({ matched: 0, fired: 0 })
+    expect(
+      await again.call('events.push', {
+        scope,
+        trigger: { kind: 'agent', pane: 'elsewhere', state: 'stopped' },
+      }),
+    ).toEqual({ matched: 0, fired: 1 })
+  })
+
+  it('GRF-C202 a pane of a run whose journal the store pruned still starts no run after a restart', async () => {
+    const { paths } = runtimePlace()
+    const first = await started(paths)
+    const folder = folderWith({
+      own: graph(
+        '  - { manual: {} }\n  - { agent: { state: stopped } }',
+        '  - { id: a, kind: agent, with: { mode: start, agent: claude, prompt: p } }',
+      ),
+    })
+    const panel = await track(pairedClient(first, 'panel', RIGHTS))
+    const scope = await enabled(panel, folder, ['own'])
+    const state = testEnv()
+    const ostia = await track(pairedClient(first, 'ostia', ['observe', 'worker', 'ingest']))
+    serveKinds(ostia, [fakeAgentKind(state)], 'ostia')
+    await ostia.call('scopes.register', { folder })
+    await ostia.call('worker.register', { kinds: ['agent'], scopes: [scope] })
+    await panel.call('runs.start', { scope, name: 'own', by: 'human' })
+    await until(() => state.agents.length === 1)
+    const pane = state.agents[0]?.pane as string
+    await until(async () => {
+      const runs = await panel.call<{ status: string }[]>('runs.list', { scope })
+      return runs[0]?.status === 'waiting'
+    })
+    await ostia.call('events.push', { scope, event: { type: 'agent-stop', pane } })
+    await until(async () => {
+      const runs = await panel.call<{ status: string }[]>('runs.list', { scope })
+      return runs[0]?.status === 'done'
+    })
+    panel.close()
+    ostia.close()
+    await first.stop()
+    runtimes.splice(runtimes.indexOf(first), 1)
+    rmSync(join(paths.data, 'runs', scopeKey(scope), 'own'), { recursive: true, force: true })
+
+    const second = await started(paths)
+    const again = await track(pairedClient(second, 'ostia', ['observe', 'worker', 'ingest']))
+    await again.call('scopes.register', { folder })
+    expect(
+      await again.call('events.push', {
+        scope,
+        trigger: { kind: 'agent', pane, state: 'stopped' },
+      }),
+    ).toEqual({ matched: 0, fired: 0 })
+    expect(
+      await again.call('events.push', {
+        scope,
+        trigger: { kind: 'agent', pane: 'elsewhere', state: 'stopped' },
+      }),
+    ).toEqual({ matched: 0, fired: 1 })
+  })
+
+  it('GRF-C202 the panes a graph runs opened are never forgotten to make room for newer ones', () => {
+    const triggers = new RuntimeTriggers({
+      clock: new FakeClock(START),
+      data: mkdtempSync(join(tmpdir(), 'wrt-panes-')),
+      enabled: () => [],
+      fire: () => {},
+      changed: () => {},
+    })
+    for (let i = 0; i < 1000; i++) triggers.notePane('k', 'g', `pane-${i}`)
+    expect(triggers.ownPane('k', 'g', 'pane-0')).toBe(true)
+    expect(triggers.ownPane('k', 'g', 'pane-999')).toBe(true)
+    expect(triggers.ownPane('k', 'other', 'pane-0')).toBe(false)
+    triggers.stop()
+  })
+
+  it('GRF-C201 a schedule of a graph that is loaded but not enabled never fires, and fires once it is enabled', async () => {
+    const { paths } = runtimePlace()
+    const clock = new FakeClock(START)
+    const runtime = await started(paths, { clock })
+    const folder = folderWith({ g: graph('  - { schedule: { every: 5m } }') })
+    const panel = await track(pairedClient(runtime, 'panel', RIGHTS))
+    const { scope } = await panel.call<{ scope: string }>('scopes.register', { folder })
+    const loaded = await panel.call<{ fingerprint: string }>('graphs.load', {
+      scope,
+      path: join(folder, 'graphs', 'g.yaml'),
+    })
+    await minutes(clock, 16)
+    expect(triggersOf(paths, scope, 'g')).toEqual([])
+    await panel.call('graphs.enable', { scope, name: 'g', fingerprint: loaded.fingerprint })
+    await minutes(clock, 6)
+    expect(triggersOf(paths, scope, 'g')).toEqual(['schedule'])
+  })
+
+  it('GRF-C201 changes within a second start one run whose trigger lists every changed path', async () => {
+    const clock = new FakeClock(START)
+    const loaded = loadGraphText(graph("  - { files: { glob: 'src/**' } }"), '/x/graphs/g.yaml')
+    if (!loaded.ok) throw new Error('graph')
+    const scope = { key: 'dir-x', id: 'dir:/x', folder: '/x', sandboxed: false, graphs: {} }
+    const listing = {
+      scope: scope.id,
+      name: 'g',
+      path: '/x/graphs/g.yaml',
+      realPath: '/x/graphs/g.yaml',
+      state: 'enabled' as const,
+      loaded: loaded.value,
+      problems: [],
+    }
+    let report: (rel: string) => void = () => {}
+    const fired: { paths?: string[] }[] = []
+    const triggers = new RuntimeTriggers({
+      clock,
+      data: mkdtempSync(join(tmpdir(), 'wrt-triggers-')),
+      enabled: () => [{ scope, listing }],
+      fire: (_graph, payload) => fired.push(payload as { paths?: string[] }),
+      changed: () => {},
+      watcher: (_root, onPath) => {
+        report = onPath
+        return { start: () => ({ ok: true, folders: 1 }), stop: () => {} }
+      },
+    })
+    triggers.refresh()
+    report('src/b.ts')
+    report('src/a.ts')
+    report('src/b.ts')
+    expect(fired).toEqual([])
+    await clock.advance(1_500)
+    await clock.advance(1_500)
+    triggers.stop()
+    expect(fired).toHaveLength(1)
+    expect(fired[0]?.paths).toEqual(['src/a.ts', 'src/b.ts'])
   })
 
   it('GRF-C212 the 17th run at once is skipped naming the global limit and counted, and 50 of 150 events in a second are rate-limited and counted', async () => {
@@ -262,7 +437,7 @@ describe('triggers and limits in the runtime', () => {
     const panel = await track(pairedClient(runtime, 'panel', RIGHTS))
     const scope = await enabled(panel, folder, ['g'])
     panel.close()
-    await new Promise((r) => setTimeout(r, 300))
+    await until(() => runtime.server.clients === 0)
     await minutes(clock, 5)
     await until(() => triggersOf(paths, scope, 'g').length === 1)
     expect(triggersOf(paths, scope, 'g')).toEqual(['schedule'])
