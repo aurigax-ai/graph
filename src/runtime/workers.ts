@@ -165,9 +165,16 @@ export function workerKind(opts: WorkerKindOptions): NodeKind {
       throw new NodeError('ConnectorFailed', 'connectors do not run in a sandboxed workspace')
   }
 
+  const cancelling = (ctx: NodeContext): (() => void) => {
+    const cancel = (): void => void pool.task(kind, 'cancel', ctx, {}).catch(() => {})
+    ctx.signal.addEventListener('abort', cancel, { once: true })
+    return () => ctx.signal.removeEventListener('abort', cancel)
+  }
+
   const start = async (input: Output, ctx: NodeContext): Promise<NodeResult> => {
     refuse(ctx)
     if (local(ctx)) return (headless as NodeKind).start(input, ctx)
+    const done = cancelling(ctx)
     try {
       return result(await pool.task(kind, 'start', ctx, { input }))
     } catch (err) {
@@ -176,6 +183,8 @@ export function workerKind(opts: WorkerKindOptions): NodeKind {
         pending: err.message === 'no worker' ? 'start' : 'reattach',
         input,
       })
+    } finally {
+      done()
     }
   }
 
@@ -192,6 +201,7 @@ export function workerKind(opts: WorkerKindOptions): NodeKind {
     }
     refuse(ctx)
     if (local(ctx) && headless?.resume) return headless.resume(wait, event, ctx)
+    const done = cancelling(ctx)
     try {
       return result(await pool.task(kind, 'resume', ctx, { wait, event }))
     } catch (err) {
@@ -201,6 +211,8 @@ export function workerKind(opts: WorkerKindOptions): NodeKind {
         wait,
         event,
       })
+    } finally {
+      done()
     }
   }
 

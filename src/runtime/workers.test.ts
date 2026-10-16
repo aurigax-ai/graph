@@ -620,4 +620,32 @@ describe('workers and pairing', () => {
     expect(tasks.map((t) => t.op)).toEqual(['reattach'])
     expect(journal(paths, scope, 'g', runId).filter((l) => l.type === 'reattach')).toHaveLength(1)
   })
+  it('GRF-C203 cancelling a run cancels the step its worker is running, by the same attempt key', async () => {
+    const { paths } = runtimePlace()
+    const runtime = await started(paths)
+    const folder = folderWith({
+      c: graph('  - { id: a, kind: command, with: { run: [sleep, "60"] } }'),
+    })
+    const panel = await track(pairedClient(runtime, 'panel', RIGHTS))
+    const scope = await enabled(panel, folder, ['c'])
+    const seen: { op: string; key: string }[] = []
+    const ostia = await track(pairedClient(runtime, 'ostia', WORKER_RIGHTS))
+    ostia.handle('worker.task', (raw) => {
+      const task = raw as WorkerTask
+      seen.push({ op: task.op, key: task.run.attemptKey })
+      if (task.op === 'start') return new Promise(() => {})
+      return { ok: true }
+    })
+    await ostia.call('scopes.register', { folder })
+    await ostia.call('worker.register', { kinds: ['command'], scopes: [scope] })
+    const { runId } = await panel.call<{ runId: string }>('runs.start', { scope, name: 'c' })
+    await until(() => seen.some((t) => t.op === 'start'))
+    expect(await panel.call('runs.control', { scope, runId, action: 'cancel' })).toEqual({
+      ok: true,
+    })
+    await until(() => seen.some((t) => t.op === 'cancel'))
+    const start = seen.find((t) => t.op === 'start')
+    expect(seen.find((t) => t.op === 'cancel')?.key).toBe(start?.key)
+    expect(await status(panel, scope, runId)).toBe('cancelled')
+  })
 })
