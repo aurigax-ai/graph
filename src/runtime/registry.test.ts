@@ -13,11 +13,11 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { RuntimeClient } from './client.ts'
+import { RuntimeClient, START_WAIT_MS } from './client.ts'
 import { lockHeld } from './lock.ts'
 import type { RuntimePaths } from './paths.ts'
 import { scopeKey } from './registry.ts'
-import type { Runtime } from './runtime.ts'
+import { DRAIN_MS, type Runtime } from './runtime.ts'
 import { cliClient, pairedClient, runtimePlace, testRuntime } from './testRuntime.ts'
 import { RIGHTS, Tokens, readCliToken } from './tokens.ts'
 
@@ -143,45 +143,96 @@ function output(child: ChildProcess): Promise<{ code: number | null; stdout: str
   return new Promise((resolve) => child.on('exit', (code) => resolve({ code, stdout })))
 }
 
-describe('the runtime registry and runs', () => {
-  it('GRF-C193 wire list with no runtime starts one and answers; stop during a command step lets the step end, starts nothing after it and exits 0', async () => {
-    const { env, paths } = runtimePlace()
-    const folder = folderWith({ slow: SLOW })
-    const list = await output(wire(env, ['list'], folder))
-    expect(list.code).toBe(0)
-    expect(JSON.parse(list.stdout)).toEqual([])
-    expect(await lockHeld(paths.data)).toBe(true)
+const STEP_MARGIN_MS = 5_000
+const START_AND_STOP_BUDGET_MS = START_WAIT_MS + DRAIN_MS + STEP_MARGIN_MS
 
-    const status = await cliClient(paths)
-    const { pid } = await status.call<{ pid: number }>('runtime.status')
-    status.close()
-    const token = new Tokens(paths.data).issue('host', RIGHTS)
-    process.kill(pid, 'SIGHUP')
-    const c = await track(RuntimeClient.connect({ socket: paths.socket, token }))
-    const scope = await enabled(c, folder, ['slow'])
-    const start = await output(wire(env, ['start', 'slow'], folder))
-    expect(start.code).toBe(0)
-    const { runId } = JSON.parse(start.stdout) as { runId: string }
-    await until(async () => {
-      const run = await c.call<{ nodes: { node: string }[] }>('runs.show', { scope, runId })
-      return run.nodes.some((n) => n.node === 'a')
+function runtimeLog(paths: RuntimePaths): string {
+  const path = join(paths.data, 'runtime.log')
+  return existsSync(path) ? readFileSync(path, 'utf8') : '(no runtime.log)'
+}
+
+function stepped(paths: RuntimePaths, budgetMs: number) {
+  const began = Date.now()
+  let current = 'setup'
+  const step = <T>(name: string, act: () => Promise<T>): Promise<T> => {
+    current = name
+    return act()
+  }
+  const report = (what: string) =>
+    `${what} in step "${current}" after ${Date.now() - began} ms\n--- runtime.log\n${runtimeLog(paths)}`
+  const within = async (body: () => Promise<void>): Promise<void> => {
+    let timer: NodeJS.Timeout | undefined
+    const stalled = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(report('stalled'))), budgetMs)
     })
-    const at = Date.now()
-    const stop = await output(wire(env, ['runtime', 'stop']))
-    expect(JSON.parse(stop.stdout)).toEqual({ ok: true, stopped: pid })
-    expect(Date.now() - at).toBeLessThan(10_000)
-    expect(await lockHeld(paths.data)).toBe(false)
+    try {
+      await Promise.race([body(), stalled])
+    } catch (err) {
+      if (err instanceof Error && !err.message.includes('--- runtime.log'))
+        err.message = `${err.message}\n${report('failed')}`
+      throw err
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  return { step, within }
+}
 
-    const journal = readFileSync(
-      join(paths.data, 'runs', scopeKey(scope), 'slow', runId, 'journal.jsonl'),
-      'utf8',
-    )
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line) as { type: string; node?: string; status?: string })
-    expect(journal.find((l) => l.type === 'node-end' && l.node === 'a')?.status).toBe('done')
-    expect(journal.some((l) => l.type === 'node-start' && l.node === 'b')).toBe(false)
-  })
+describe('the runtime registry and runs', () => {
+  it(
+    'GRF-C193 wire list with no runtime starts one and answers; stop during a command step lets the step end, starts nothing after it and exits 0',
+    async () => {
+      const { env, paths } = runtimePlace()
+      const { step, within } = stepped(paths, START_AND_STOP_BUDGET_MS)
+      await within(async () => {
+        const folder = folderWith({ slow: SLOW })
+        const list = await step('wire list', () => output(wire(env, ['list'], folder)))
+        expect(list.code).toBe(0)
+        expect(JSON.parse(list.stdout)).toEqual([])
+        expect(await step('lock held', () => lockHeld(paths.data))).toBe(true)
+
+        const { pid } = await step('runtime.status', async () => {
+          const status = await cliClient(paths)
+          try {
+            return await status.call<{ pid: number }>('runtime.status')
+          } finally {
+            status.close()
+          }
+        })
+        const token = new Tokens(paths.data).issue('host', RIGHTS)
+        process.kill(pid, 'SIGHUP')
+        const c = await step('host connect', () =>
+          track(RuntimeClient.connect({ socket: paths.socket, token })),
+        )
+        const scope = await step('enable', () => enabled(c, folder, ['slow']))
+        const start = await step('wire start', () => output(wire(env, ['start', 'slow'], folder)))
+        expect(start.code).toBe(0)
+        const { runId } = JSON.parse(start.stdout) as { runId: string }
+        await step('step a started', () =>
+          until(async () => {
+            const run = await c.call<{ nodes: { node: string }[] }>('runs.show', { scope, runId })
+            return run.nodes.some((n) => n.node === 'a')
+          }),
+        )
+        const at = Date.now()
+        const stop = await step('wire runtime stop', () => output(wire(env, ['runtime', 'stop'])))
+        expect(JSON.parse(stop.stdout)).toEqual({ ok: true, stopped: pid })
+        expect(Date.now() - at).toBeLessThan(10_000)
+        expect(await step('lock released', () => lockHeld(paths.data))).toBe(false)
+
+        const journal = readFileSync(
+          join(paths.data, 'runs', scopeKey(scope), 'slow', runId, 'journal.jsonl'),
+          'utf8',
+        )
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line) as { type: string; node?: string; status?: string })
+        expect(journal.find((l) => l.type === 'node-end' && l.node === 'a')?.status).toBe('done')
+        expect(journal.some((l) => l.type === 'node-start' && l.node === 'b')).toBe(false)
+      })
+    },
+    START_AND_STOP_BUDGET_MS + STEP_MARGIN_MS,
+  )
 
   it('GRF-C195 a graph enabled with the fingerprint it showed is enabled; a change outside ui disables it and a change of ui does not', async () => {
     const { paths } = runtimePlace()
