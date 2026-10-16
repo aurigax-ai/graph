@@ -21,8 +21,11 @@ folder: the lock is held by the kernel and ends with the process (on Linux an ab
 from the data folder's private `lock-id`, on macOS an exclusive lock on `runtime.lock`), and
 `runtime.lock` names the holder's pid. A second start exits with `already-running` and that pid.
 Clients find the runtime's pid by asking it (`runtime.status`), never from the file. A runtime
-also refuses to start (`socket-in-use`) while another runtime, of another data folder, answers on
-its socket.
+also holds a second lock of the same kind in its socket folder (`socket-lock-id`, `socket.lock`)
+for its whole life, taken before it looks at the socket. It refuses to start (`socket-in-use`)
+while another runtime holds that lock, or while anything answers on the socket, or when the
+socket gives any answer but "refused" or "not there" within a second (a full backlog, for
+instance); only then does it remove the old socket file and listen.
 
 ## Tokens and rights
 
